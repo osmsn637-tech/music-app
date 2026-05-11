@@ -1,0 +1,1303 @@
+{
+  "version": 3,
+  "voiceId": "deep_host",
+  "clips": [
+    {
+      "id": "gen_intro_set_001",
+      "path": "gen_intro_set_001.opus",
+      "intent": "intro_set",
+      "position": "opener"
+    },
+    {
+      "id": "gen_intro_set_002",
+      "path": "gen_intro_set_002.opus",
+      "intent": "intro_set",
+      "position": "opener"
+    },
+    {
+      "id": "gen_intro_set_003",
+      "path": "gen_intro_set_003.opus",
+      "intent": "intro_set",
+      "position": "opener"
+    },
+    {
+      "id": "gen_set_closer_001",
+      "path": "gen_set_closer_001.opus",
+      "intent": "set_closer",
+      "position": "closer"
+    },
+    {
+      "id": "gen_set_closer_002",
+      "path": "gen_set_closer_002.opus",
+      "intent": "set_closer",
+      "position": "closer"
+    },
+    {
+      "id": "gen_set_closer_003",
+      "path": "gen_set_closer_003.opus",
+      "intent": "set_closer",
+      "position": "closer"
+    },
+    {
+      "id": "gen_next_track_001",
+      "path": "gen_next_track_001.opus",
+      "intent": "next_track"
+    },
+    {
+      "id": "gen_next_track_002",
+      "path": "gen_next_track_002.opus",
+      "intent": "next_track"
+    },
+    {
+      "id": "gen_next_track_003",
+      "path": "gen_next_track_003.opus",
+      "intent": "next_track"
+    },
+    {
+      "id": "gen_energy_up_001",
+      "path": "gen_energy_up_001.opus",
+      "intent": "energy_up"
+    },
+    {
+      "id": "gen_energy_up_002",
+      "path": "gen_energy_up_002.opus",
+      "intent": "energy_up"
+    },
+    {
+      "id": "gen_energy_up_003",
+      "path": "gen_energy_up_003.opus",
+      "intent": "energy_up"
+    },
+    {
+      "id": "gen_energy_down_001",
+      "path": "gen_energy_down_001.opus",
+      "intent": "energy_down"
+    },
+    {
+      "id": "gen_energy_down_002",
+      "path": "gen_energy_down_002.opus",
+      "intent": "energy_down"
+    },
+    {
+      "id": "gen_energy_down_003",
+      "path": "gen_energy_down_003.opus",
+      "intent": "energy_down"
+    },
+    {
+      "id": "gen_keep_vibe_001",
+      "path": "gen_keep_vibe_001.opus",
+      "intent": "keep_vibe"
+    },
+    {
+      "id": "gen_keep_vibe_002",
+      "path": "gen_keep_vibe_002.opus",
+      "intent": "keep_vibe"
+    },
+    {
+      "id": "gen_keep_vibe_003",
+      "path": "gen_keep_vibe_003.opus",
+      "intent": "keep_vibe"
+    },
+    {
+      "id": "gen_study_focus_001",
+      "path": "gen_study_focus_001.opus",
+      "intent": "study_focus",
+      "mode": "study"
+    },
+    {
+      "id": "gen_study_focus_002",
+      "path": "gen_study_focus_002.opus",
+      "intent": "study_focus",
+      "mode": "study"
+    },
+    {
+      "id": "gen_study_focus_003",
+      "path": "gen_study_focus_003.opus",
+      "intent": "study_focus",
+      "mode": "study"
+    },
+    {
+      "id": "gen_chill_transition_001",
+      "path": "gen_chill_transition_001.opus",
+      "intent": "chill_transition",
+      "mode": "chill"
+    },
+    {
+      "id": "gen_chill_transition_002",
+      "path": "gen_chill_transition_002.opus",
+      "intent": "chill_transition",
+      "mode": "chill"
+    },
+    {
+      "id": "gen_chill_transition_003",
+      "path": "gen_chill_transition_003.opus",
+      "intent": "chill_transition",
+      "mode": "chill"
+    },
+    {
+      "id": "gen_workout_boost_001",
+      "path": "gen_workout_boost_001.opus",
+      "intent": "workout_boost",
+      "mode": "workout"
+    },
+    {
+      "id": "gen_workout_boost_002",
+      "path": "gen_workout_boost_002.opus",
+      "intent": "workout_boost",
+      "mode": "workout"
+    },
+    {
+      "id": "gen_workout_boost_003",
+      "path": "gen_workout_boost_003.opus",
+      "intent": "workout_boost",
+      "mode": "workout"
+    },
+    {
+      "id": "gen_night_drive_001",
+      "path": "gen_night_drive_001.opus",
+      "intent": "night_drive",
+      "mode": "night"
+    },
+    {
+      "id": "gen_night_drive_002",
+      "path": "gen_night_drive_002.opus",
+      "intent": "night_drive",
+      "mode": "night"
+    },
+    {
+      "id": "gen_night_drive_003",
+      "path": "gen_night_drive_003.opus",
+      "intent": "night_drive",
+      "mode": "night"
+    },
+    {
+      "id": "gen_discovery_001",
+      "path": "gen_discovery_001.opus",
+      "intent": "discovery"
+    },
+    {
+      "id": "gen_discovery_002",
+      "path": "gen_discovery_002.opus",
+      "intent": "discovery"
+    },
+    {
+      "id": "gen_discovery_003",
+      "path": "gen_discovery_003.opus",
+      "intent": "discovery"
+    },
+    {
+      "id": "gen_throwback_001",
+      "path": "gen_throwback_001.opus",
+      "intent": "throwback"
+    },
+    {
+      "id": "gen_throwback_002",
+      "path": "gen_throwback_002.opus",
+      "intent": "throwback"
+    },
+    {
+      "id": "gen_throwback_003",
+      "path": "gen_throwback_003.opus",
+      "intent": "throwback"
+    },
+    {
+      "id": "gen_favorite_return_001",
+      "path": "gen_favorite_return_001.opus",
+      "intent": "favorite_return"
+    },
+    {
+      "id": "gen_favorite_return_002",
+      "path": "gen_favorite_return_002.opus",
+      "intent": "favorite_return"
+    },
+    {
+      "id": "gen_favorite_return_003",
+      "path": "gen_favorite_return_003.opus",
+      "intent": "favorite_return"
+    },
+    {
+      "id": "gen_artist_spotlight_001",
+      "path": "gen_artist_spotlight_001.opus",
+      "intent": "artist_spotlight"
+    },
+    {
+      "id": "gen_artist_spotlight_002",
+      "path": "gen_artist_spotlight_002.opus",
+      "intent": "artist_spotlight"
+    },
+    {
+      "id": "gen_artist_spotlight_003",
+      "path": "gen_artist_spotlight_003.opus",
+      "intent": "artist_spotlight"
+    },
+    {
+      "id": "gen_mood_shift_001",
+      "path": "gen_mood_shift_001.opus",
+      "intent": "mood_shift"
+    },
+    {
+      "id": "gen_mood_shift_002",
+      "path": "gen_mood_shift_002.opus",
+      "intent": "mood_shift"
+    },
+    {
+      "id": "gen_mood_shift_003",
+      "path": "gen_mood_shift_003.opus",
+      "intent": "mood_shift"
+    },
+    {
+      "id": "gen_recover_from_skip_001",
+      "path": "gen_recover_from_skip_001.opus",
+      "intent": "recover_from_skip"
+    },
+    {
+      "id": "gen_recover_from_skip_002",
+      "path": "gen_recover_from_skip_002.opus",
+      "intent": "recover_from_skip"
+    },
+    {
+      "id": "gen_recover_from_skip_003",
+      "path": "gen_recover_from_skip_003.opus",
+      "intent": "recover_from_skip"
+    },
+    {
+      "id": "gen_lyric_anchor_001",
+      "path": "gen_lyric_anchor_001.opus",
+      "intent": "next_track"
+    },
+    {
+      "id": "gen_lyric_anchor_002",
+      "path": "gen_lyric_anchor_002.opus",
+      "intent": "next_track"
+    },
+    {
+      "id": "gen_lyric_anchor_003",
+      "path": "gen_lyric_anchor_003.opus",
+      "intent": "next_track"
+    },
+    {
+      "id": "mode_intro_study_001",
+      "path": "mode_intro_study_001.opus",
+      "intent": "intro_set",
+      "position": "opener",
+      "mode": "study",
+      "priority": 5
+    },
+    {
+      "id": "mode_intro_study_002",
+      "path": "mode_intro_study_002.opus",
+      "intent": "intro_set",
+      "position": "opener",
+      "mode": "study",
+      "priority": 5
+    },
+    {
+      "id": "mode_intro_chill_001",
+      "path": "mode_intro_chill_001.opus",
+      "intent": "intro_set",
+      "position": "opener",
+      "mode": "chill",
+      "priority": 5
+    },
+    {
+      "id": "mode_intro_chill_002",
+      "path": "mode_intro_chill_002.opus",
+      "intent": "intro_set",
+      "position": "opener",
+      "mode": "chill",
+      "priority": 5
+    },
+    {
+      "id": "mode_intro_workout_001",
+      "path": "mode_intro_workout_001.opus",
+      "intent": "intro_set",
+      "position": "opener",
+      "mode": "workout",
+      "priority": 5
+    },
+    {
+      "id": "mode_intro_workout_002",
+      "path": "mode_intro_workout_002.opus",
+      "intent": "intro_set",
+      "position": "opener",
+      "mode": "workout",
+      "priority": 5
+    },
+    {
+      "id": "mode_intro_night_001",
+      "path": "mode_intro_night_001.opus",
+      "intent": "intro_set",
+      "position": "opener",
+      "mode": "night",
+      "priority": 5
+    },
+    {
+      "id": "mode_intro_night_002",
+      "path": "mode_intro_night_002.opus",
+      "intent": "intro_set",
+      "position": "opener",
+      "mode": "night",
+      "priority": 5
+    },
+    {
+      "id": "mode_intro_favorites_001",
+      "path": "mode_intro_favorites_001.opus",
+      "intent": "intro_set",
+      "position": "opener",
+      "mode": "favorites",
+      "priority": 5
+    },
+    {
+      "id": "mode_intro_favorites_002",
+      "path": "mode_intro_favorites_002.opus",
+      "intent": "intro_set",
+      "position": "opener",
+      "mode": "favorites",
+      "priority": 5
+    },
+    {
+      "id": "mode_intro_discover_001",
+      "path": "mode_intro_discover_001.opus",
+      "intent": "intro_set",
+      "position": "opener",
+      "mode": "discover",
+      "priority": 5
+    },
+    {
+      "id": "mode_intro_discover_002",
+      "path": "mode_intro_discover_002.opus",
+      "intent": "intro_set",
+      "position": "opener",
+      "mode": "discover",
+      "priority": 5
+    },
+    {
+      "id": "mode_intro_smart_shuffle_001",
+      "path": "mode_intro_smart_shuffle_001.opus",
+      "intent": "intro_set",
+      "position": "opener",
+      "mode": "smart_shuffle",
+      "priority": 5
+    },
+    {
+      "id": "mode_intro_smart_shuffle_002",
+      "path": "mode_intro_smart_shuffle_002.opus",
+      "intent": "intro_set",
+      "position": "opener",
+      "mode": "smart_shuffle",
+      "priority": 5
+    },
+    {
+      "id": "artist_drake_001",
+      "path": "artist_drake_001.opus",
+      "artistId": "drake",
+      "priority": 5
+    },
+    {
+      "id": "artist_drake_002",
+      "path": "artist_drake_002.opus",
+      "artistId": "drake",
+      "priority": 5
+    },
+    {
+      "id": "artist_drake_003",
+      "path": "artist_drake_003.opus",
+      "artistId": "drake",
+      "priority": 5
+    },
+    {
+      "id": "artist_drake_004",
+      "path": "artist_drake_004.opus",
+      "artistId": "drake",
+      "priority": 5
+    },
+    {
+      "id": "artist_drake_005",
+      "path": "artist_drake_005.opus",
+      "artistId": "drake",
+      "priority": 5
+    },
+    {
+      "id": "artist_drake_006",
+      "path": "artist_drake_006.opus",
+      "artistId": "drake",
+      "priority": 5
+    },
+    {
+      "id": "artist_drake_007",
+      "path": "artist_drake_007.opus",
+      "artistId": "drake",
+      "priority": 5
+    },
+    {
+      "id": "artist_drake_008",
+      "path": "artist_drake_008.opus",
+      "artistId": "drake",
+      "priority": 5
+    },
+    {
+      "id": "artist_don_toliver_001",
+      "path": "artist_don_toliver_001.opus",
+      "artistId": "don-toliver",
+      "priority": 5
+    },
+    {
+      "id": "artist_don_toliver_002",
+      "path": "artist_don_toliver_002.opus",
+      "artistId": "don-toliver",
+      "priority": 5
+    },
+    {
+      "id": "artist_don_toliver_003",
+      "path": "artist_don_toliver_003.opus",
+      "artistId": "don-toliver",
+      "priority": 5
+    },
+    {
+      "id": "artist_don_toliver_004",
+      "path": "artist_don_toliver_004.opus",
+      "artistId": "don-toliver",
+      "priority": 5
+    },
+    {
+      "id": "artist_don_toliver_005",
+      "path": "artist_don_toliver_005.opus",
+      "artistId": "don-toliver",
+      "priority": 5
+    },
+    {
+      "id": "artist_don_toliver_006",
+      "path": "artist_don_toliver_006.opus",
+      "artistId": "don-toliver",
+      "priority": 5
+    },
+    {
+      "id": "artist_don_toliver_007",
+      "path": "artist_don_toliver_007.opus",
+      "artistId": "don-toliver",
+      "priority": 5
+    },
+    {
+      "id": "artist_don_toliver_008",
+      "path": "artist_don_toliver_008.opus",
+      "artistId": "don-toliver",
+      "priority": 5
+    },
+    {
+      "id": "artist_j_cole_001",
+      "path": "artist_j_cole_001.opus",
+      "artistId": "j-cole",
+      "priority": 5
+    },
+    {
+      "id": "artist_j_cole_002",
+      "path": "artist_j_cole_002.opus",
+      "artistId": "j-cole",
+      "priority": 5
+    },
+    {
+      "id": "artist_j_cole_003",
+      "path": "artist_j_cole_003.opus",
+      "artistId": "j-cole",
+      "priority": 5
+    },
+    {
+      "id": "artist_j_cole_004",
+      "path": "artist_j_cole_004.opus",
+      "artistId": "j-cole",
+      "priority": 5
+    },
+    {
+      "id": "artist_j_cole_005",
+      "path": "artist_j_cole_005.opus",
+      "artistId": "j-cole",
+      "priority": 5
+    },
+    {
+      "id": "artist_j_cole_006",
+      "path": "artist_j_cole_006.opus",
+      "artistId": "j-cole",
+      "priority": 5
+    },
+    {
+      "id": "artist_j_cole_007",
+      "path": "artist_j_cole_007.opus",
+      "artistId": "j-cole",
+      "priority": 5
+    },
+    {
+      "id": "artist_j_cole_008",
+      "path": "artist_j_cole_008.opus",
+      "artistId": "j-cole",
+      "priority": 5
+    },
+    {
+      "id": "artist_baby_keem_001",
+      "path": "artist_baby_keem_001.opus",
+      "artistId": "baby-keem",
+      "priority": 5
+    },
+    {
+      "id": "artist_baby_keem_002",
+      "path": "artist_baby_keem_002.opus",
+      "artistId": "baby-keem",
+      "priority": 5
+    },
+    {
+      "id": "artist_baby_keem_003",
+      "path": "artist_baby_keem_003.opus",
+      "artistId": "baby-keem",
+      "priority": 5
+    },
+    {
+      "id": "artist_baby_keem_004",
+      "path": "artist_baby_keem_004.opus",
+      "artistId": "baby-keem",
+      "priority": 5
+    },
+    {
+      "id": "artist_baby_keem_005",
+      "path": "artist_baby_keem_005.opus",
+      "artistId": "baby-keem",
+      "priority": 5
+    },
+    {
+      "id": "artist_baby_keem_006",
+      "path": "artist_baby_keem_006.opus",
+      "artistId": "baby-keem",
+      "priority": 5
+    },
+    {
+      "id": "artist_baby_keem_007",
+      "path": "artist_baby_keem_007.opus",
+      "artistId": "baby-keem",
+      "priority": 5
+    },
+    {
+      "id": "artist_baby_keem_008",
+      "path": "artist_baby_keem_008.opus",
+      "artistId": "baby-keem",
+      "priority": 5
+    },
+    {
+      "id": "artist_travis_scott_001",
+      "path": "artist_travis_scott_001.opus",
+      "artistId": "travis-scott",
+      "priority": 5
+    },
+    {
+      "id": "artist_travis_scott_002",
+      "path": "artist_travis_scott_002.opus",
+      "artistId": "travis-scott",
+      "priority": 5
+    },
+    {
+      "id": "artist_travis_scott_003",
+      "path": "artist_travis_scott_003.opus",
+      "artistId": "travis-scott",
+      "priority": 5
+    },
+    {
+      "id": "artist_travis_scott_004",
+      "path": "artist_travis_scott_004.opus",
+      "artistId": "travis-scott",
+      "priority": 5
+    },
+    {
+      "id": "artist_travis_scott_005",
+      "path": "artist_travis_scott_005.opus",
+      "artistId": "travis-scott",
+      "priority": 5
+    },
+    {
+      "id": "artist_travis_scott_006",
+      "path": "artist_travis_scott_006.opus",
+      "artistId": "travis-scott",
+      "priority": 5
+    },
+    {
+      "id": "artist_travis_scott_007",
+      "path": "artist_travis_scott_007.opus",
+      "artistId": "travis-scott",
+      "priority": 5
+    },
+    {
+      "id": "artist_travis_scott_008",
+      "path": "artist_travis_scott_008.opus",
+      "artistId": "travis-scott",
+      "priority": 5
+    },
+    {
+      "id": "artist_asap_rocky_001",
+      "path": "artist_asap_rocky_001.opus",
+      "artistId": "asap-rocky",
+      "priority": 5
+    },
+    {
+      "id": "artist_asap_rocky_002",
+      "path": "artist_asap_rocky_002.opus",
+      "artistId": "asap-rocky",
+      "priority": 5
+    },
+    {
+      "id": "artist_asap_rocky_003",
+      "path": "artist_asap_rocky_003.opus",
+      "artistId": "asap-rocky",
+      "priority": 5
+    },
+    {
+      "id": "artist_asap_rocky_004",
+      "path": "artist_asap_rocky_004.opus",
+      "artistId": "asap-rocky",
+      "priority": 5
+    },
+    {
+      "id": "artist_asap_rocky_005",
+      "path": "artist_asap_rocky_005.opus",
+      "artistId": "asap-rocky",
+      "priority": 5
+    },
+    {
+      "id": "artist_asap_rocky_006",
+      "path": "artist_asap_rocky_006.opus",
+      "artistId": "asap-rocky",
+      "priority": 5
+    },
+    {
+      "id": "artist_asap_rocky_007",
+      "path": "artist_asap_rocky_007.opus",
+      "artistId": "asap-rocky",
+      "priority": 5
+    },
+    {
+      "id": "artist_asap_rocky_008",
+      "path": "artist_asap_rocky_008.opus",
+      "artistId": "asap-rocky",
+      "priority": 5
+    },
+    {
+      "id": "artist_partynextdoor_001",
+      "path": "artist_partynextdoor_001.opus",
+      "artistId": "partynextdoor",
+      "priority": 5
+    },
+    {
+      "id": "artist_partynextdoor_002",
+      "path": "artist_partynextdoor_002.opus",
+      "artistId": "partynextdoor",
+      "priority": 5
+    },
+    {
+      "id": "artist_partynextdoor_003",
+      "path": "artist_partynextdoor_003.opus",
+      "artistId": "partynextdoor",
+      "priority": 5
+    },
+    {
+      "id": "artist_partynextdoor_004",
+      "path": "artist_partynextdoor_004.opus",
+      "artistId": "partynextdoor",
+      "priority": 5
+    },
+    {
+      "id": "artist_partynextdoor_005",
+      "path": "artist_partynextdoor_005.opus",
+      "artistId": "partynextdoor",
+      "priority": 5
+    },
+    {
+      "id": "artist_partynextdoor_006",
+      "path": "artist_partynextdoor_006.opus",
+      "artistId": "partynextdoor",
+      "priority": 5
+    },
+    {
+      "id": "artist_partynextdoor_007",
+      "path": "artist_partynextdoor_007.opus",
+      "artistId": "partynextdoor",
+      "priority": 5
+    },
+    {
+      "id": "artist_partynextdoor_008",
+      "path": "artist_partynextdoor_008.opus",
+      "artistId": "partynextdoor",
+      "priority": 5
+    },
+    {
+      "id": "artist_imagine_dragons_001",
+      "path": "artist_imagine_dragons_001.opus",
+      "artistId": "imagine-dragons",
+      "priority": 5
+    },
+    {
+      "id": "artist_imagine_dragons_002",
+      "path": "artist_imagine_dragons_002.opus",
+      "artistId": "imagine-dragons",
+      "priority": 5
+    },
+    {
+      "id": "artist_imagine_dragons_003",
+      "path": "artist_imagine_dragons_003.opus",
+      "artistId": "imagine-dragons",
+      "priority": 5
+    },
+    {
+      "id": "artist_imagine_dragons_004",
+      "path": "artist_imagine_dragons_004.opus",
+      "artistId": "imagine-dragons",
+      "priority": 5
+    },
+    {
+      "id": "artist_imagine_dragons_005",
+      "path": "artist_imagine_dragons_005.opus",
+      "artistId": "imagine-dragons",
+      "priority": 5
+    },
+    {
+      "id": "artist_imagine_dragons_006",
+      "path": "artist_imagine_dragons_006.opus",
+      "artistId": "imagine-dragons",
+      "priority": 5
+    },
+    {
+      "id": "artist_imagine_dragons_007",
+      "path": "artist_imagine_dragons_007.opus",
+      "artistId": "imagine-dragons",
+      "priority": 5
+    },
+    {
+      "id": "artist_imagine_dragons_008",
+      "path": "artist_imagine_dragons_008.opus",
+      "artistId": "imagine-dragons",
+      "priority": 5
+    },
+    {
+      "id": "song_sicko_mode_001",
+      "path": "song_sicko_mode_001.opus",
+      "songSlug": "sicko-mode",
+      "priority": 10
+    },
+    {
+      "id": "song_sicko_mode_002",
+      "path": "song_sicko_mode_002.opus",
+      "songSlug": "sicko-mode",
+      "priority": 10
+    },
+    {
+      "id": "song_sicko_mode_003",
+      "path": "song_sicko_mode_003.opus",
+      "songSlug": "sicko-mode",
+      "priority": 10
+    },
+    {
+      "id": "song_sicko_mode_004",
+      "path": "song_sicko_mode_004.opus",
+      "songSlug": "sicko-mode",
+      "priority": 10
+    },
+    {
+      "id": "song_sicko_mode_005",
+      "path": "song_sicko_mode_005.opus",
+      "songSlug": "sicko-mode",
+      "priority": 10
+    },
+    {
+      "id": "song_sicko_mode_006",
+      "path": "song_sicko_mode_006.opus",
+      "songSlug": "sicko-mode",
+      "priority": 10
+    },
+    {
+      "id": "song_sicko_mode_007",
+      "path": "song_sicko_mode_007.opus",
+      "songSlug": "sicko-mode",
+      "priority": 10
+    },
+    {
+      "id": "song_sicko_mode_lyric_001",
+      "path": "song_sicko_mode_lyric_001.opus",
+      "songSlug": "sicko-mode",
+      "priority": 10
+    },
+    {
+      "id": "song_stargazing_001",
+      "path": "song_stargazing_001.opus",
+      "songSlug": "stargazing",
+      "priority": 10
+    },
+    {
+      "id": "song_stargazing_002",
+      "path": "song_stargazing_002.opus",
+      "songSlug": "stargazing",
+      "priority": 10
+    },
+    {
+      "id": "song_stargazing_003",
+      "path": "song_stargazing_003.opus",
+      "songSlug": "stargazing",
+      "priority": 10
+    },
+    {
+      "id": "song_stargazing_004",
+      "path": "song_stargazing_004.opus",
+      "songSlug": "stargazing",
+      "priority": 10
+    },
+    {
+      "id": "song_stargazing_005",
+      "path": "song_stargazing_005.opus",
+      "songSlug": "stargazing",
+      "priority": 10
+    },
+    {
+      "id": "song_stargazing_006",
+      "path": "song_stargazing_006.opus",
+      "songSlug": "stargazing",
+      "priority": 10
+    },
+    {
+      "id": "song_stargazing_007",
+      "path": "song_stargazing_007.opus",
+      "songSlug": "stargazing",
+      "priority": 10
+    },
+    {
+      "id": "song_stargazing_008",
+      "path": "song_stargazing_008.opus",
+      "songSlug": "stargazing",
+      "priority": 10
+    },
+    {
+      "id": "song_butterfly_effect_001",
+      "path": "song_butterfly_effect_001.opus",
+      "songSlug": "butterfly-effect",
+      "priority": 10
+    },
+    {
+      "id": "song_butterfly_effect_002",
+      "path": "song_butterfly_effect_002.opus",
+      "songSlug": "butterfly-effect",
+      "priority": 10
+    },
+    {
+      "id": "song_butterfly_effect_003",
+      "path": "song_butterfly_effect_003.opus",
+      "songSlug": "butterfly-effect",
+      "priority": 10
+    },
+    {
+      "id": "song_butterfly_effect_004",
+      "path": "song_butterfly_effect_004.opus",
+      "songSlug": "butterfly-effect",
+      "priority": 10
+    },
+    {
+      "id": "song_butterfly_effect_005",
+      "path": "song_butterfly_effect_005.opus",
+      "songSlug": "butterfly-effect",
+      "priority": 10
+    },
+    {
+      "id": "song_butterfly_effect_006",
+      "path": "song_butterfly_effect_006.opus",
+      "songSlug": "butterfly-effect",
+      "priority": 10
+    },
+    {
+      "id": "song_butterfly_effect_007",
+      "path": "song_butterfly_effect_007.opus",
+      "songSlug": "butterfly-effect",
+      "priority": 10
+    },
+    {
+      "id": "song_butterfly_effect_008",
+      "path": "song_butterfly_effect_008.opus",
+      "songSlug": "butterfly-effect",
+      "priority": 10
+    },
+    {
+      "id": "song_astrothunder_001",
+      "path": "song_astrothunder_001.opus",
+      "songSlug": "astrothunder",
+      "priority": 10
+    },
+    {
+      "id": "song_astrothunder_002",
+      "path": "song_astrothunder_002.opus",
+      "songSlug": "astrothunder",
+      "priority": 10
+    },
+    {
+      "id": "song_astrothunder_003",
+      "path": "song_astrothunder_003.opus",
+      "songSlug": "astrothunder",
+      "priority": 10
+    },
+    {
+      "id": "song_astrothunder_004",
+      "path": "song_astrothunder_004.opus",
+      "songSlug": "astrothunder",
+      "priority": 10
+    },
+    {
+      "id": "song_astrothunder_005",
+      "path": "song_astrothunder_005.opus",
+      "songSlug": "astrothunder",
+      "priority": 10
+    },
+    {
+      "id": "song_astrothunder_006",
+      "path": "song_astrothunder_006.opus",
+      "songSlug": "astrothunder",
+      "priority": 10
+    },
+    {
+      "id": "song_astrothunder_007",
+      "path": "song_astrothunder_007.opus",
+      "songSlug": "astrothunder",
+      "priority": 10
+    },
+    {
+      "id": "song_astrothunder_008",
+      "path": "song_astrothunder_008.opus",
+      "songSlug": "astrothunder",
+      "priority": 10
+    },
+    {
+      "id": "song_8am_charlotte_001",
+      "path": "song_8am_charlotte_001.opus",
+      "songSlug": "8am-charlotte",
+      "priority": 10
+    },
+    {
+      "id": "song_8am_charlotte_002",
+      "path": "song_8am_charlotte_002.opus",
+      "songSlug": "8am-charlotte",
+      "priority": 10
+    },
+    {
+      "id": "song_8am_charlotte_003",
+      "path": "song_8am_charlotte_003.opus",
+      "songSlug": "8am-charlotte",
+      "priority": 10
+    },
+    {
+      "id": "song_8am_charlotte_004",
+      "path": "song_8am_charlotte_004.opus",
+      "songSlug": "8am-charlotte",
+      "priority": 10
+    },
+    {
+      "id": "song_8am_charlotte_005",
+      "path": "song_8am_charlotte_005.opus",
+      "songSlug": "8am-charlotte",
+      "priority": 10
+    },
+    {
+      "id": "song_8am_charlotte_006",
+      "path": "song_8am_charlotte_006.opus",
+      "songSlug": "8am-charlotte",
+      "priority": 10
+    },
+    {
+      "id": "song_8am_charlotte_007",
+      "path": "song_8am_charlotte_007.opus",
+      "songSlug": "8am-charlotte",
+      "priority": 10
+    },
+    {
+      "id": "song_8am_charlotte_008",
+      "path": "song_8am_charlotte_008.opus",
+      "songSlug": "8am-charlotte",
+      "priority": 10
+    },
+    {
+      "id": "song_from_time_001",
+      "path": "song_from_time_001.opus",
+      "songSlug": "from-time",
+      "priority": 10
+    },
+    {
+      "id": "song_from_time_002",
+      "path": "song_from_time_002.opus",
+      "songSlug": "from-time",
+      "priority": 10
+    },
+    {
+      "id": "song_from_time_003",
+      "path": "song_from_time_003.opus",
+      "songSlug": "from-time",
+      "priority": 10
+    },
+    {
+      "id": "song_from_time_004",
+      "path": "song_from_time_004.opus",
+      "songSlug": "from-time",
+      "priority": 10
+    },
+    {
+      "id": "song_from_time_005",
+      "path": "song_from_time_005.opus",
+      "songSlug": "from-time",
+      "priority": 10
+    },
+    {
+      "id": "song_from_time_006",
+      "path": "song_from_time_006.opus",
+      "songSlug": "from-time",
+      "priority": 10
+    },
+    {
+      "id": "song_from_time_007",
+      "path": "song_from_time_007.opus",
+      "songSlug": "from-time",
+      "priority": 10
+    },
+    {
+      "id": "song_from_time_lyric_001",
+      "path": "song_from_time_lyric_001.opus",
+      "songSlug": "from-time",
+      "priority": 10
+    },
+    {
+      "id": "song_like_that_001",
+      "path": "song_like_that_001.opus",
+      "songSlug": "like-that",
+      "priority": 10
+    },
+    {
+      "id": "song_like_that_002",
+      "path": "song_like_that_002.opus",
+      "songSlug": "like-that",
+      "priority": 10
+    },
+    {
+      "id": "song_like_that_003",
+      "path": "song_like_that_003.opus",
+      "songSlug": "like-that",
+      "priority": 10
+    },
+    {
+      "id": "song_like_that_004",
+      "path": "song_like_that_004.opus",
+      "songSlug": "like-that",
+      "priority": 10
+    },
+    {
+      "id": "song_like_that_005",
+      "path": "song_like_that_005.opus",
+      "songSlug": "like-that",
+      "priority": 10
+    },
+    {
+      "id": "song_like_that_006",
+      "path": "song_like_that_006.opus",
+      "songSlug": "like-that",
+      "priority": 10
+    },
+    {
+      "id": "song_like_that_007",
+      "path": "song_like_that_007.opus",
+      "songSlug": "like-that",
+      "priority": 10
+    },
+    {
+      "id": "song_like_that_008",
+      "path": "song_like_that_008.opus",
+      "songSlug": "like-that",
+      "priority": 10
+    },
+    {
+      "id": "song_first_person_shooter_001",
+      "path": "song_first_person_shooter_001.opus",
+      "songSlug": "first-person-shooter",
+      "priority": 10
+    },
+    {
+      "id": "song_first_person_shooter_002",
+      "path": "song_first_person_shooter_002.opus",
+      "songSlug": "first-person-shooter",
+      "priority": 10
+    },
+    {
+      "id": "song_first_person_shooter_003",
+      "path": "song_first_person_shooter_003.opus",
+      "songSlug": "first-person-shooter",
+      "priority": 10
+    },
+    {
+      "id": "song_first_person_shooter_004",
+      "path": "song_first_person_shooter_004.opus",
+      "songSlug": "first-person-shooter",
+      "priority": 10
+    },
+    {
+      "id": "song_first_person_shooter_005",
+      "path": "song_first_person_shooter_005.opus",
+      "songSlug": "first-person-shooter",
+      "priority": 10
+    },
+    {
+      "id": "song_first_person_shooter_006",
+      "path": "song_first_person_shooter_006.opus",
+      "songSlug": "first-person-shooter",
+      "priority": 10
+    },
+    {
+      "id": "song_first_person_shooter_007",
+      "path": "song_first_person_shooter_007.opus",
+      "songSlug": "first-person-shooter",
+      "priority": 10
+    },
+    {
+      "id": "song_first_person_shooter_lyric_001",
+      "path": "song_first_person_shooter_lyric_001.opus",
+      "songSlug": "first-person-shooter",
+      "priority": 10
+    },
+    {
+      "id": "song_knife_talk_001",
+      "path": "song_knife_talk_001.opus",
+      "songSlug": "knife-talk",
+      "priority": 10
+    },
+    {
+      "id": "song_knife_talk_002",
+      "path": "song_knife_talk_002.opus",
+      "songSlug": "knife-talk",
+      "priority": 10
+    },
+    {
+      "id": "song_knife_talk_003",
+      "path": "song_knife_talk_003.opus",
+      "songSlug": "knife-talk",
+      "priority": 10
+    },
+    {
+      "id": "song_knife_talk_004",
+      "path": "song_knife_talk_004.opus",
+      "songSlug": "knife-talk",
+      "priority": 10
+    },
+    {
+      "id": "song_knife_talk_005",
+      "path": "song_knife_talk_005.opus",
+      "songSlug": "knife-talk",
+      "priority": 10
+    },
+    {
+      "id": "song_knife_talk_006",
+      "path": "song_knife_talk_006.opus",
+      "songSlug": "knife-talk",
+      "priority": 10
+    },
+    {
+      "id": "song_knife_talk_007",
+      "path": "song_knife_talk_007.opus",
+      "songSlug": "knife-talk",
+      "priority": 10
+    },
+    {
+      "id": "song_knife_talk_lyric_001",
+      "path": "song_knife_talk_lyric_001.opus",
+      "songSlug": "knife-talk",
+      "priority": 10
+    },
+    {
+      "id": "song_what_did_i_miss_001",
+      "path": "song_what_did_i_miss_001.opus",
+      "songSlug": "what-did-i-miss",
+      "priority": 10
+    },
+    {
+      "id": "song_what_did_i_miss_002",
+      "path": "song_what_did_i_miss_002.opus",
+      "songSlug": "what-did-i-miss",
+      "priority": 10
+    },
+    {
+      "id": "song_what_did_i_miss_003",
+      "path": "song_what_did_i_miss_003.opus",
+      "songSlug": "what-did-i-miss",
+      "priority": 10
+    },
+    {
+      "id": "song_what_did_i_miss_004",
+      "path": "song_what_did_i_miss_004.opus",
+      "songSlug": "what-did-i-miss",
+      "priority": 10
+    },
+    {
+      "id": "song_what_did_i_miss_005",
+      "path": "song_what_did_i_miss_005.opus",
+      "songSlug": "what-did-i-miss",
+      "priority": 10
+    },
+    {
+      "id": "song_what_did_i_miss_006",
+      "path": "song_what_did_i_miss_006.opus",
+      "songSlug": "what-did-i-miss",
+      "priority": 10
+    },
+    {
+      "id": "song_what_did_i_miss_007",
+      "path": "song_what_did_i_miss_007.opus",
+      "songSlug": "what-did-i-miss",
+      "priority": 10
+    },
+    {
+      "id": "song_what_did_i_miss_lyric_001",
+      "path": "song_what_did_i_miss_lyric_001.opus",
+      "songSlug": "what-did-i-miss",
+      "priority": 10
+    },
+    {
+      "id": "song_natural_001",
+      "path": "song_natural_001.opus",
+      "songSlug": "natural",
+      "priority": 10
+    },
+    {
+      "id": "song_natural_002",
+      "path": "song_natural_002.opus",
+      "songSlug": "natural",
+      "priority": 10
+    },
+    {
+      "id": "song_natural_003",
+      "path": "song_natural_003.opus",
+      "songSlug": "natural",
+      "priority": 10
+    },
+    {
+      "id": "song_natural_004",
+      "path": "song_natural_004.opus",
+      "songSlug": "natural",
+      "priority": 10
+    },
+    {
+      "id": "song_natural_005",
+      "path": "song_natural_005.opus",
+      "songSlug": "natural",
+      "priority": 10
+    },
+    {
+      "id": "song_natural_006",
+      "path": "song_natural_006.opus",
+      "songSlug": "natural",
+      "priority": 10
+    },
+    {
+      "id": "song_natural_007",
+      "path": "song_natural_007.opus",
+      "songSlug": "natural",
+      "priority": 10
+    },
+    {
+      "id": "song_natural_lyric_001",
+      "path": "song_natural_lyric_001.opus",
+      "songSlug": "natural",
+      "priority": 10
+    }
+  ]
+}

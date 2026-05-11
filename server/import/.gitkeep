@@ -1,0 +1,11 @@
+Drop MP3 / M4A / FLAC / OGG files here, then run:
+
+    docker compose --profile tools run --rm importer
+
+Or point the importer at any folder:
+
+    IMPORT_DIR=/path/to/your/music docker compose --profile tools run --rm importer
+
+Sub-folders are scanned recursively. Same-stem .lrc lyrics and .jpg/.png
+artwork files are picked up automatically; embedded ID3 artwork is also
+extracted when no sidecar image is present.

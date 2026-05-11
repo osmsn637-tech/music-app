@@ -1,0 +1,29 @@
+songs/
+.venv/
+build/
+.claude/
+quick pick daynamic bg/
+
+# Large local artifacts
+data/*.pt
+data/*.tar.gz
+
+# Python
+__pycache__/
+*.pyc
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Flutter/Dart generated
+**/.dart_tool/
+**/.flutter-plugins-dependencies
+**/build/
+**/coverage/
+
+# Logs and temp
+*.log
+*.tmp
+*.download

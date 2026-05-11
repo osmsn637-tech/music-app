@@ -1,0 +1,951 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Music App — Wireframes</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root {
+    /* Wireframe greyscale palette — intentionally flat. */
+    --bg: #1f2024;
+    --canvas: #2a2b30;
+    --frame: #ffffff;
+    --ink: #1a1a1a;
+    --ink-2: #555;
+    --ink-3: #8a8a8a;
+    --line: #d0d2d6;
+    --fill-1: #ececef;
+    --fill-2: #dcdee2;
+    --fill-3: #c4c7cd;
+    --label: #b6b8be;
+    --note: #d8a657;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: #e8e8ea;
+    font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  header.page {
+    padding: 32px 40px 8px;
+  }
+  header.page h1 {
+    font-size: 22px;
+    margin: 0 0 6px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+  }
+  header.page p {
+    margin: 0;
+    color: #a1a3a8;
+    max-width: 720px;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+    gap: 56px 40px;
+    padding: 40px;
+  }
+
+  .cell { display: flex; flex-direction: column; align-items: flex-start; }
+  .cell .label {
+    font-size: 12px;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: var(--label);
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+  .cell .label small {
+    color: #6b6d72;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: 0;
+    margin-left: 8px;
+  }
+
+  /* iPhone-ish frame. */
+  .frame {
+    width: 393px;
+    height: 852px;
+    background: var(--frame);
+    color: var(--ink);
+    border-radius: 44px;
+    padding: 0;
+    overflow: hidden;
+    position: relative;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+  }
+  .frame .scroll {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+  }
+
+  /* Status bar (the dynamic-island row). */
+  .statusbar {
+    height: 44px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 28px 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    position: relative;
+  }
+  .statusbar::after {
+    content: "";
+    position: absolute;
+    top: 10px; left: 50%;
+    transform: translateX(-50%);
+    width: 110px; height: 28px;
+    background: #111;
+    border-radius: 999px;
+  }
+  .statusbar .right { display: flex; gap: 6px; align-items: center; color: var(--ink-2); font-size: 12px; }
+
+  /* Profile button (top-right) */
+  .profile-btn {
+    position: absolute;
+    top: 56px; right: 16px;
+    width: 38px; height: 38px;
+    border-radius: 999px;
+    background: var(--fill-1);
+    border: 1px solid var(--line);
+    z-index: 5;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--ink-2);
+    font-size: 16px;
+  }
+
+  /* Bottom glass tab bar */
+  .tabbar {
+    position: absolute;
+    left: 14px; right: 14px;
+    bottom: 24px;
+    height: 64px;
+    border-radius: 999px;
+    background: rgba(20,20,20,0.92);
+    color: #fff;
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    padding: 0 12px;
+    z-index: 5;
+  }
+  .tab { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 10px; opacity: 0.55; }
+  .tab.active { opacity: 1; font-weight: 700; }
+  .tab .dot { width: 22px; height: 22px; border-radius: 6px; background: rgba(255,255,255,0.18); display:flex; align-items:center; justify-content:center; font-size: 12px; }
+  .tab.active .dot { background: rgba(255,255,255,0.35); }
+
+  /* Mini-player — sits above tabbar on shell screens */
+  .miniplayer {
+    position: absolute;
+    left: 14px; right: 14px;
+    bottom: 100px;
+    height: 60px;
+    border-radius: 16px;
+    background: rgba(20,20,20,0.92);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    gap: 12px;
+    z-index: 5;
+  }
+  .miniplayer .art { width: 44px; height: 44px; border-radius: 8px; background: var(--fill-3); }
+  .miniplayer .meta { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+  .miniplayer .line-1 { height: 8px; width: 60%; background: rgba(255,255,255,0.7); border-radius: 2px; }
+  .miniplayer .line-2 { height: 6px; width: 40%; background: rgba(255,255,255,0.4); border-radius: 2px; }
+  .miniplayer .play { width: 32px; height: 32px; border-radius: 999px; background: rgba(255,255,255,0.95); color: #000; display:flex; align-items:center; justify-content:center; font-size: 14px; }
+
+  /* Generic blocks. */
+  .pad { padding: 0 18px; }
+  .h-eyebrow {
+    font-size: 11px;
+    letter-spacing: 0.7px;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-weight: 600;
+    margin: 12px 0 4px;
+  }
+  .h-title {
+    font-size: 28px;
+    line-height: 1.05;
+    letter-spacing: -0.6px;
+    font-weight: 800;
+    color: var(--ink);
+    margin: 0 0 6px;
+  }
+  .h-section {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--ink);
+    margin: 18px 0 10px;
+  }
+  .h-section .eyebrow {
+    display: block;
+    font-size: 10px;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .h-section .all {
+    float: right;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink-3);
+  }
+
+  .box { background: var(--fill-1); border: 1px solid var(--line); border-radius: 10px; }
+  .box.dashed { border-style: dashed; background: transparent; color: var(--ink-3); display:flex; align-items:center; justify-content:center; font-size: 11px; }
+  .pill { background: var(--fill-1); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; font-size: 11px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px; }
+  .pill.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+  .stub-line { height: 8px; background: var(--fill-2); border-radius: 2px; }
+  .stub-line.short { width: 40%; }
+  .stub-line.med { width: 65%; }
+  .stub-line.long { width: 90%; }
+
+  /* Hero feature card (AI DJ on home) */
+  .feature {
+    margin-top: 12px;
+    height: 168px;
+    background: var(--fill-1);
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    padding: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+  .feature .orb {
+    position: absolute;
+    right: -40px; top: -40px;
+    width: 180px; height: 180px;
+    border-radius: 999px;
+    background: radial-gradient(circle at 30% 30%, var(--fill-3), var(--fill-2) 60%, transparent 75%);
+  }
+  .feature .eyebrow { color: var(--ink-3); font-size: 10px; font-weight: 700; letter-spacing: 0.6px; }
+  .feature .head { font-size: 18px; font-weight: 700; line-height: 1.15; max-width: 230px; margin: 8px 0 0; }
+  .feature .cta { position: absolute; left: 16px; bottom: 16px; display:flex; gap: 10px; align-items:center; }
+  .feature .cta .btn { background: var(--ink); color: #fff; padding: 8px 14px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+  .feature .cta .wave { display:flex; gap: 3px; }
+  .feature .cta .wave span { width: 3px; height: 14px; background: var(--ink-2); border-radius: 2px; }
+  .feature .cta .wave span:nth-child(2){ height: 18px; }
+  .feature .cta .wave span:nth-child(3){ height: 8px; }
+  .feature .cta .wave span:nth-child(4){ height: 16px; }
+  .feature .cta .wave span:nth-child(5){ height: 12px; }
+
+  /* Horizontal rails */
+  .rail {
+    display: flex;
+    gap: 12px;
+    overflow: hidden;
+    padding-bottom: 4px;
+  }
+  .rail .tile { flex: 0 0 auto; }
+  .tile-art { width: 140px; }
+  .tile-art .art { width: 140px; height: 140px; background: var(--fill-2); border-radius: 12px; }
+  .tile-art .t { margin-top: 8px; height: 8px; background: var(--fill-2); border-radius: 2px; width: 80%; }
+  .tile-art .s { margin-top: 4px; height: 6px; background: var(--fill-1); border-radius: 2px; width: 55%; }
+  .tile-pl { width: 200px; background: var(--fill-1); border: 1px solid var(--line); border-radius: 14px; padding: 10px; }
+  .tile-pl .art { width: 100%; aspect-ratio: 1/1; background: var(--fill-2); border-radius: 10px; }
+  .tile-pl .t { margin-top: 8px; height: 9px; background: var(--fill-2); border-radius: 2px; width: 70%; }
+  .tile-pl .s { margin-top: 4px; height: 7px; background: var(--fill-1); border-radius: 2px; width: 40%; }
+
+  .tile-artist { width: 100px; display:flex; flex-direction:column; align-items:center; }
+  .tile-artist .av { width: 90px; height: 90px; background: var(--fill-2); border-radius: 999px; }
+  .tile-artist .n { margin-top: 8px; height: 8px; background: var(--fill-2); border-radius: 2px; width: 70%; }
+
+  /* Library list rows */
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+    border-top: 1px solid var(--fill-2);
+  }
+  .row:first-child { border-top: 0; }
+  .row .art { width: 44px; height: 44px; background: var(--fill-2); border-radius: 8px; }
+  .row .meta { flex: 1; display:flex; flex-direction:column; gap: 5px; }
+  .row .meta .a { height: 9px; background: var(--fill-2); width: 70%; border-radius: 2px; }
+  .row .meta .b { height: 7px; background: var(--fill-1); width: 45%; border-radius: 2px; }
+  .row .more { color: var(--ink-3); font-size: 14px; }
+
+  /* Search browse grid */
+  .browse-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .browse-grid .cat {
+    height: 90px;
+    background: var(--fill-1);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    display: flex;
+    align-items: flex-end;
+    padding: 10px;
+    font-weight: 700;
+    color: var(--ink-2);
+    font-size: 13px;
+  }
+
+  /* Search field */
+  .search-field {
+    background: var(--fill-1);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--ink-3);
+    font-size: 13px;
+  }
+
+  /* Player screen blocks */
+  .player-bg {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(60% 50% at 50% 30%, var(--fill-2), transparent 70%),
+      var(--fill-1);
+  }
+  .player-pad { position: relative; height: 100%; padding: 60px 24px 28px; display: flex; flex-direction: column; }
+  .player-header { display: flex; align-items: center; gap: 12px; }
+  .icon-circle { width: 36px; height: 36px; border-radius: 999px; background: var(--fill-1); border: 1px solid var(--line); display:flex; align-items:center; justify-content:center; color: var(--ink-2); font-size: 14px; }
+  .player-header .col { flex: 1; text-align: center; display:flex; flex-direction:column; gap: 4px; align-items:center; }
+  .player-header .col .a { font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--ink-3); font-weight: 700; }
+  .player-header .col .b { font-size: 12px; font-weight: 700; color: var(--ink-2); }
+  .player-art { aspect-ratio: 1/1; background: var(--fill-3); border-radius: 22px; margin: 28px 6px; }
+  .player-titlebar { display:flex; align-items:center; gap: 12px; }
+  .player-titlebar .col { flex: 1; display:flex; flex-direction:column; gap: 6px; }
+  .player-titlebar .t { height: 14px; width: 70%; background: var(--ink); border-radius: 2px; }
+  .player-titlebar .s { height: 9px; width: 50%; background: var(--ink-3); border-radius: 2px; }
+  .player-progress { height: 4px; background: var(--fill-2); border-radius: 999px; margin-top: 16px; position: relative; }
+  .player-progress::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 35%; background: var(--ink); border-radius: 999px; }
+  .player-progress::after { content: ""; position: absolute; left: 35%; top: -3px; width: 10px; height: 10px; border-radius: 999px; background: var(--ink); transform: translateX(-5px); }
+  .player-times { display:flex; justify-content:space-between; font-size: 10px; color: var(--ink-3); margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .player-controls { display:flex; justify-content:space-evenly; align-items:center; margin-top: 18px; }
+  .player-controls .icon { color: var(--ink-2); font-size: 22px; }
+  .player-controls .play { width: 64px; height: 64px; border-radius: 999px; background: var(--ink); color: #fff; display:flex; align-items:center; justify-content:center; font-size: 24px; }
+  .player-secondary { display:flex; justify-content:space-between; margin-top: 18px; padding: 0 8px; color: var(--ink-3); font-size: 18px; }
+
+  /* Lyrics screen */
+  .lyric-line { padding: 10px 4px; color: var(--ink-3); font-size: 16px; font-weight: 700; }
+  .lyric-line.active { color: var(--ink); font-size: 22px; font-weight: 800; }
+  .lyric-line.past { color: var(--fill-3); }
+
+  /* AI DJ orb */
+  .orb-big {
+    width: 200px; height: 200px; margin: 18px auto;
+    border-radius: 999px;
+    background:
+      radial-gradient(circle at 35% 30%, #fff, var(--fill-2) 40%, var(--fill-3) 80%);
+    border: 1px solid var(--line);
+  }
+  .host-bubble {
+    background: var(--fill-1);
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    padding: 14px;
+  }
+  .host-bubble .row { border: 0; padding: 0; }
+  .host-bubble .av { width: 28px; height: 28px; border-radius: 999px; background: var(--fill-3); }
+
+  /* Settings rows */
+  .settings-section { margin-top: 18px; }
+  .settings-section .h { font-size: 11px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--ink-3); font-weight: 700; padding: 0 18px 8px; }
+  .settings-row {
+    display:flex; align-items:center; gap: 12px;
+    padding: 12px 18px;
+    border-top: 1px solid var(--fill-2);
+  }
+  .settings-row .icon { width: 22px; color: var(--ink-3); }
+  .settings-row .meta { flex:1; display:flex; flex-direction:column; gap: 4px; }
+  .settings-row .meta .a { font-size: 13px; color: var(--ink); font-weight: 600; }
+  .settings-row .meta .b { font-size: 11px; color: var(--ink-3); }
+  .settings-row .trail { color: var(--ink-3); font-size: 12px; }
+  .toggle { width: 36px; height: 20px; border-radius: 999px; background: var(--fill-3); position: relative; }
+  .toggle::after { content: ""; position: absolute; right: 2px; top: 2px; width: 16px; height: 16px; border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+  .toggle.off { background: var(--fill-2); }
+  .toggle.off::after { left: 2px; right: auto; }
+  .radio { width: 18px; height: 18px; border-radius: 999px; border: 2px solid var(--ink-3); display:flex; align-items:center; justify-content:center; }
+  .radio.on { border-color: var(--ink); }
+  .radio.on::after { content: ""; width: 8px; height: 8px; border-radius: 999px; background: var(--ink); }
+
+  /* Sync */
+  .url-pill {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--fill-1);
+    text-align: center;
+    padding: 10px 14px;
+  }
+  .url-pill .a { font-size: 12px; font-weight: 700; color: var(--ink); }
+  .url-pill .b { font-size: 11px; color: var(--ink-3); margin-top: 2px; }
+  .btn-row { display:flex; gap: 10px; margin-top: 12px; }
+  .btn-row .btn {
+    flex:1;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    text-align: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--ink);
+    background: var(--fill-1);
+  }
+  .btn-row .btn.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .activity-row { display:flex; align-items:center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--fill-2); font-size: 12px; }
+  .activity-row .icon { color: var(--ink-3); }
+  .activity-row .name { flex:1; color: var(--ink); }
+  .activity-row .pct { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+  /* Playlist detail */
+  .appbar { display:flex; align-items:center; gap: 8px; padding: 0 16px; height: 48px; border-bottom: 1px solid var(--fill-2); }
+  .appbar .back { font-size: 18px; color: var(--ink-2); }
+  .appbar .title { flex:1; font-size: 16px; font-weight: 700; color: var(--ink); }
+  .fab {
+    position: absolute; right: 18px; bottom: 110px;
+    background: var(--ink); color: #fff;
+    border-radius: 999px;
+    padding: 14px 20px;
+    font-weight: 700; font-size: 13px;
+    display:flex; gap: 8px; align-items:center;
+    z-index: 4;
+  }
+  .drag-handle { color: var(--ink-3); font-size: 18px; }
+
+  .note {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: rgba(216, 166, 87, 0.10);
+    border: 1px dashed rgba(216, 166, 87, 0.55);
+    color: #b88a47;
+    border-radius: 8px;
+    font-size: 11px;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+  <header class="page">
+    <h1>Music App — Wireframes</h1>
+    <p>Low-fidelity layouts for all 9 screens of the Flutter music app, plus the bottom shell. Use these as a structural reference — colours, imagery and the glass/blur effects are intentionally stripped out so structure is the only signal.</p>
+  </header>
+
+  <div class="grid">
+
+    <!-- ========== HOME SHELL CHROME (reference) ========== -->
+    <div class="cell">
+      <div class="label">00 — Shell chrome <small>tabs + mini-player + profile</small></div>
+      <div class="frame">
+        <div class="scroll">
+          <div class="statusbar"><span>9:41</span><span class="right">·· ⌃ ▮</span></div>
+          <div class="profile-btn">◐</div>
+          <div style="padding: 100px 24px; color: var(--ink-3); text-align:center; font-size: 12px;">
+            Reference frame — every shell screen (Home, AI DJ, Search, Library) sits inside this:<br><br>
+            • Top-right round profile button (opens profile sheet)<br>
+            • Floating glass tab bar at the bottom<br>
+            • Mini-player above the tab bar when something's playing
+          </div>
+          <div class="miniplayer">
+            <div class="art"></div>
+            <div class="meta"><div class="line-1"></div><div class="line-2"></div></div>
+            <div class="play">▶</div>
+          </div>
+          <div class="tabbar">
+            <div class="tab active"><div class="dot">⌂</div>Home</div>
+            <div class="tab"><div class="dot">★</div>AI DJ</div>
+            <div class="tab"><div class="dot">⌕</div>Search</div>
+            <div class="tab"><div class="dot">♬</div>Library</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== HOME ========== -->
+    <div class="cell">
+      <div class="label">01 — Home <small>Listen Now</small></div>
+      <div class="frame">
+        <div class="scroll">
+          <div class="statusbar"><span>9:41</span><span class="right">·· ⌃ ▮</span></div>
+          <div class="profile-btn">◐</div>
+
+          <div class="pad">
+            <div class="h-eyebrow">Wednesday, May 3</div>
+            <h2 class="h-title">Listen Now</h2>
+
+            <!-- AI DJ feature card -->
+            <div class="feature">
+              <div class="orb"></div>
+              <div class="eyebrow">★ AI DJ</div>
+              <div class="head">Tonight's set, hosted just for you</div>
+              <div class="cta">
+                <div class="btn">▶ Start Station</div>
+                <div class="wave"><span></span><span></span><span></span><span></span><span></span></div>
+              </div>
+            </div>
+
+            <div class="h-section">
+              <span class="eyebrow">Recently Played</span>
+              Pick up where you left off
+            </div>
+            <div class="rail">
+              <div class="tile tile-art"><div class="art"></div><div class="t"></div><div class="s"></div></div>
+              <div class="tile tile-art"><div class="art"></div><div class="t"></div><div class="s"></div></div>
+              <div class="tile tile-art"><div class="art"></div><div class="t"></div><div class="s"></div></div>
+            </div>
+
+            <div class="h-section">
+              <span class="all">See All</span>
+              <span class="eyebrow">Made For You</span>
+              Stations from your taste
+            </div>
+            <div class="rail">
+              <div class="tile tile-pl"><div class="art"></div><div class="t"></div><div class="s"></div></div>
+              <div class="tile tile-pl"><div class="art"></div><div class="t"></div><div class="s"></div></div>
+            </div>
+          </div>
+          <div class="miniplayer">
+            <div class="art"></div>
+            <div class="meta"><div class="line-1"></div><div class="line-2"></div></div>
+            <div class="play">▶</div>
+          </div>
+          <div class="tabbar">
+            <div class="tab active"><div class="dot">⌂</div>Home</div>
+            <div class="tab"><div class="dot">★</div>AI DJ</div>
+            <div class="tab"><div class="dot">⌕</div>Search</div>
+            <div class="tab"><div class="dot">♬</div>Library</div>
+          </div>
+        </div>
+      </div>
+      <div class="note">Lower sections off-screen: <b>Top Picks</b> rail (smaller art tiles) and <b>Artists</b> rail (round avatars).</div>
+    </div>
+
+    <!-- ========== AI DJ ========== -->
+    <div class="cell">
+      <div class="label">02 — AI DJ <small>Tonight's Set</small></div>
+      <div class="frame">
+        <div class="scroll">
+          <div class="statusbar"><span>9:41</span><span class="right">·· ⌃ ▮</span></div>
+          <div class="profile-btn">◐</div>
+
+          <div class="pad">
+            <div class="h-eyebrow">★ AI DJ · LIVE</div>
+            <h2 class="h-title">Tonight's Set</h2>
+            <div style="color: var(--ink-3); font-size: 12px; margin-bottom: 12px;">A voice host mixing your library and a few new finds.</div>
+
+            <!-- Free-text request -->
+            <div class="search-field" style="border-radius: 14px;">
+              <span style="color: var(--ink-3);">✨</span>
+              <span style="flex:1;">Tell the DJ what you want…</span>
+              <span style="color: var(--ink-3);">→</span>
+            </div>
+
+            <!-- Mode chips -->
+            <div class="rail" style="margin-top: 14px;">
+              <span class="pill active">Smart Shuffle</span>
+              <span class="pill">Study</span>
+              <span class="pill">Chill</span>
+              <span class="pill">Workout</span>
+              <span class="pill">Night</span>
+            </div>
+
+            <!-- Orb -->
+            <div class="orb-big"></div>
+
+            <!-- Start CTA -->
+            <div style="text-align:center; margin: 4px 0 16px;">
+              <span class="pill" style="background: var(--ink); color:#fff; border-color: var(--ink); padding: 12px 20px; font-size: 13px;">▶ Start the set</span>
+            </div>
+
+            <!-- Host bubble -->
+            <div class="host-bubble">
+              <div class="row" style="display:flex; align-items:center; gap: 10px;">
+                <div class="av"></div>
+                <div style="font-weight: 700; font-size: 12px;">Host</div>
+                <div style="margin-left:auto; display:flex; gap: 3px;"><span style="width:3px;height:10px;background:var(--ink-3);border-radius:2px;"></span><span style="width:3px;height:14px;background:var(--ink-3);border-radius:2px;"></span><span style="width:3px;height:8px;background:var(--ink-3);border-radius:2px;"></span></div>
+              </div>
+              <div style="margin-top: 10px;">
+                <div class="stub-line long"></div>
+                <div class="stub-line med" style="margin-top: 6px;"></div>
+              </div>
+            </div>
+
+            <!-- Now mixing card -->
+            <div style="margin-top: 14px; background: var(--fill-1); border: 1px solid var(--line); border-radius: 18px; padding: 12px; display:flex; align-items:center; gap: 12px;">
+              <div style="width: 56px; height: 56px; background: var(--fill-3); border-radius: 10px;"></div>
+              <div style="flex:1;">
+                <div style="font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--ink-3); font-weight: 700;">Now Mixing</div>
+                <div style="height: 10px; background: var(--fill-2); border-radius: 2px; width: 80%; margin-top: 6px;"></div>
+                <div style="height: 7px; background: var(--fill-2); border-radius: 2px; width: 50%; margin-top: 4px;"></div>
+              </div>
+              <div class="icon-circle">▶</div>
+            </div>
+          </div>
+
+          <div class="miniplayer">
+            <div class="art"></div>
+            <div class="meta"><div class="line-1"></div><div class="line-2"></div></div>
+            <div class="play">▶</div>
+          </div>
+          <div class="tabbar">
+            <div class="tab"><div class="dot">⌂</div>Home</div>
+            <div class="tab active"><div class="dot">★</div>AI DJ</div>
+            <div class="tab"><div class="dot">⌕</div>Search</div>
+            <div class="tab"><div class="dot">♬</div>Library</div>
+          </div>
+        </div>
+      </div>
+      <div class="note">No "Up Next" list — by design, the DJ keeps the next track a surprise.</div>
+    </div>
+
+    <!-- ========== SEARCH ========== -->
+    <div class="cell">
+      <div class="label">03 — Search <small>browse + results</small></div>
+      <div class="frame">
+        <div class="scroll">
+          <div class="statusbar"><span>9:41</span><span class="right">·· ⌃ ▮</span></div>
+          <div class="profile-btn">◐</div>
+
+          <div class="pad">
+            <h2 class="h-title">Search</h2>
+
+            <div class="search-field">
+              <span>⌕</span>
+              <span style="flex:1;">Artists, songs, lyrics, and more</span>
+            </div>
+
+            <div class="h-section">Browse Categories</div>
+            <div class="browse-grid">
+              <div class="cat">Pop</div>
+              <div class="cat">Indie</div>
+              <div class="cat">Electronic</div>
+              <div class="cat">Jazz</div>
+              <div class="cat">R&amp;B</div>
+              <div class="cat">Ambient</div>
+              <div class="cat">Hip-Hop</div>
+              <div class="cat">Rock</div>
+            </div>
+
+            <div class="h-section">Trending in your library</div>
+            <div style="display:flex; flex-direction:column; gap: 6px; padding: 4px 0;">
+              <div style="font-size: 12px; color: var(--ink-2);">1.&nbsp;&nbsp;Song Title — Artist</div>
+              <div style="font-size: 12px; color: var(--ink-2);">2.&nbsp;&nbsp;Song Title — Artist</div>
+              <div style="font-size: 12px; color: var(--ink-2);">3.&nbsp;&nbsp;Song Title — Artist</div>
+              <div style="font-size: 12px; color: var(--ink-2);">4.&nbsp;&nbsp;Song Title — Artist</div>
+            </div>
+          </div>
+
+          <div class="miniplayer">
+            <div class="art"></div>
+            <div class="meta"><div class="line-1"></div><div class="line-2"></div></div>
+            <div class="play">▶</div>
+          </div>
+          <div class="tabbar">
+            <div class="tab"><div class="dot">⌂</div>Home</div>
+            <div class="tab"><div class="dot">★</div>AI DJ</div>
+            <div class="tab active"><div class="dot">⌕</div>Search</div>
+            <div class="tab"><div class="dot">♬</div>Library</div>
+          </div>
+        </div>
+      </div>
+      <div class="note">Typing in the field replaces the browse grid with a vertical list of song-row results. Empty result shows a "No songs match…" message.</div>
+    </div>
+
+    <!-- ========== LIBRARY (Songs) ========== -->
+    <div class="cell">
+      <div class="label">04 — Library <small>Songs tab</small></div>
+      <div class="frame">
+        <div class="scroll">
+          <div class="statusbar"><span>9:41</span><span class="right">·· ⌃ ▮</span></div>
+          <div class="profile-btn">◐</div>
+
+          <div class="pad">
+            <h2 class="h-title">Library</h2>
+            <div class="rail" style="margin: 10px 0 12px;">
+              <span class="pill active">Songs</span>
+              <span class="pill">Favorites</span>
+              <span class="pill">Playlists</span>
+            </div>
+
+            <div class="row"><div class="art"></div><div class="meta"><div class="a"></div><div class="b"></div></div><div class="more">···</div></div>
+            <div class="row"><div class="art"></div><div class="meta"><div class="a"></div><div class="b"></div></div><div class="more">···</div></div>
+            <div class="row"><div class="art"></div><div class="meta"><div class="a"></div><div class="b"></div></div><div class="more">···</div></div>
+            <div class="row"><div class="art"></div><div class="meta"><div class="a"></div><div class="b"></div></div><div class="more">···</div></div>
+            <div class="row"><div class="art"></div><div class="meta"><div class="a"></div><div class="b"></div></div><div class="more">···</div></div>
+            <div class="row"><div class="art"></div><div class="meta"><div class="a"></div><div class="b"></div></div><div class="more">···</div></div>
+            <div class="row"><div class="art"></div><div class="meta"><div class="a"></div><div class="b"></div></div><div class="more">···</div></div>
+          </div>
+
+          <div class="miniplayer">
+            <div class="art"></div>
+            <div class="meta"><div class="line-1"></div><div class="line-2"></div></div>
+            <div class="play">▶</div>
+          </div>
+          <div class="tabbar">
+            <div class="tab"><div class="dot">⌂</div>Home</div>
+            <div class="tab"><div class="dot">★</div>AI DJ</div>
+            <div class="tab"><div class="dot">⌕</div>Search</div>
+            <div class="tab active"><div class="dot">♬</div>Library</div>
+          </div>
+        </div>
+      </div>
+      <div class="note">Tap row → opens Player. Long-press → song-actions sheet. Heart toggle on each row toggles favorite. Switching to <b>Playlists</b> tab swaps the list for a 2-column playlist grid (see frame 09).</div>
+    </div>
+
+    <!-- ========== LIBRARY (Playlists) ========== -->
+    <div class="cell">
+      <div class="label">05 — Library <small>Playlists tab</small></div>
+      <div class="frame">
+        <div class="scroll">
+          <div class="statusbar"><span>9:41</span><span class="right">·· ⌃ ▮</span></div>
+          <div class="profile-btn">◐</div>
+
+          <div class="pad">
+            <h2 class="h-title">Library</h2>
+            <div class="rail" style="margin: 10px 0 12px;">
+              <span class="pill">Songs</span>
+              <span class="pill">Favorites</span>
+              <span class="pill active">Playlists</span>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+              <div class="tile-pl"><div class="art"></div><div class="t"></div><div class="s"></div></div>
+              <div class="tile-pl"><div class="art"></div><div class="t"></div><div class="s"></div></div>
+              <div class="tile-pl"><div class="art"></div><div class="t"></div><div class="s"></div></div>
+              <div class="tile-pl"><div class="art"></div><div class="t"></div><div class="s"></div></div>
+              <div class="tile-pl"><div class="art"></div><div class="t"></div><div class="s"></div></div>
+              <div class="tile-pl"><div class="art"></div><div class="t"></div><div class="s"></div></div>
+            </div>
+          </div>
+
+          <div class="miniplayer">
+            <div class="art"></div>
+            <div class="meta"><div class="line-1"></div><div class="line-2"></div></div>
+            <div class="play">▶</div>
+          </div>
+          <div class="tabbar">
+            <div class="tab"><div class="dot">⌂</div>Home</div>
+            <div class="tab"><div class="dot">★</div>AI DJ</div>
+            <div class="tab"><div class="dot">⌕</div>Search</div>
+            <div class="tab active"><div class="dot">♬</div>Library</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== PLAYER ========== -->
+    <div class="cell">
+      <div class="label">06 — Player <small>full-screen</small></div>
+      <div class="frame">
+        <div class="scroll">
+          <div class="player-bg"></div>
+          <div class="statusbar"><span>9:41</span><span class="right">·· ⌃ ▮</span></div>
+
+          <div class="player-pad">
+            <div class="player-header">
+              <div class="icon-circle">▼</div>
+              <div class="col">
+                <div class="a">Playing from album</div>
+                <div class="b">Album Name</div>
+              </div>
+              <div class="icon-circle">···</div>
+            </div>
+
+            <div class="player-art"></div>
+
+            <div class="player-titlebar">
+              <div class="col">
+                <div class="t"></div>
+                <div class="s"></div>
+              </div>
+              <div class="icon-circle">♡</div>
+            </div>
+
+            <div class="player-progress"></div>
+            <div class="player-times"><span>1:24</span><span>-2:36</span></div>
+
+            <div class="player-controls">
+              <div class="icon">⏮</div>
+              <div class="play">▶</div>
+              <div class="icon">⏭</div>
+            </div>
+
+            <div class="player-secondary">
+              <span>↻</span>
+              <span>♪</span>
+              <span>★</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="note">No tab bar / mini-player here — Player is pushed full-screen on top of the shell. Background is a heavily blurred version of the album art (the "bloom").</div>
+    </div>
+
+    <!-- ========== LYRICS ========== -->
+    <div class="cell">
+      <div class="label">07 — Lyrics <small>karaoke</small></div>
+      <div class="frame">
+        <div class="scroll">
+          <div class="player-bg"></div>
+          <div class="statusbar"><span>9:41</span><span class="right">·· ⌃ ▮</span></div>
+
+          <div style="position: relative; padding: 8px 16px; display:flex; align-items:center; gap: 12px;">
+            <div class="icon-circle">▼</div>
+            <div style="flex:1;">
+              <div style="font-size: 14px; font-weight: 700;">Song Title</div>
+              <div style="font-size: 11px; color: var(--ink-3);">Artist Name</div>
+            </div>
+          </div>
+
+          <div style="position: relative; padding: 80px 28px;">
+            <div class="lyric-line past">Past line, dimmed out</div>
+            <div class="lyric-line past">Past line, dimmed out</div>
+            <div class="lyric-line past">Past line, dimmed out</div>
+            <div class="lyric-line active">Active line — bigger and bright</div>
+            <div class="lyric-line">Upcoming line</div>
+            <div class="lyric-line">Upcoming line</div>
+            <div class="lyric-line">Upcoming line</div>
+            <div class="lyric-line">Upcoming line</div>
+          </div>
+        </div>
+      </div>
+      <div class="note">Active line scrolls to ~38% of viewport. Each word lights up as the playhead reaches it (karaoke). Tap any line to seek to that timestamp.</div>
+    </div>
+
+    <!-- ========== PLAYLIST DETAIL ========== -->
+    <div class="cell">
+      <div class="label">08 — Playlist Detail <small>reorderable</small></div>
+      <div class="frame">
+        <div class="scroll">
+          <div class="statusbar"><span>9:41</span><span class="right">·· ⌃ ▮</span></div>
+          <div class="appbar" style="margin-top: 0;">
+            <div class="back">‹</div>
+            <div class="title">Playlist Name</div>
+            <div style="color: var(--ink-3);">⋮</div>
+          </div>
+
+          <div class="pad" style="padding-top: 8px;">
+            <div class="row"><div class="art"></div><div class="meta"><div class="a"></div><div class="b"></div></div><div class="drag-handle">≡</div></div>
+            <div class="row"><div class="art"></div><div class="meta"><div class="a"></div><div class="b"></div></div><div class="drag-handle">≡</div></div>
+            <div class="row"><div class="art"></div><div class="meta"><div class="a"></div><div class="b"></div></div><div class="drag-handle">≡</div></div>
+            <div class="row"><div class="art"></div><div class="meta"><div class="a"></div><div class="b"></div></div><div class="drag-handle">≡</div></div>
+            <div class="row"><div class="art"></div><div class="meta"><div class="a"></div><div class="b"></div></div><div class="drag-handle">≡</div></div>
+            <div class="row"><div class="art"></div><div class="meta"><div class="a"></div><div class="b"></div></div><div class="drag-handle">≡</div></div>
+            <div class="row"><div class="art"></div><div class="meta"><div class="a"></div><div class="b"></div></div><div class="drag-handle">≡</div></div>
+          </div>
+
+          <div class="fab">＋ Add songs</div>
+        </div>
+      </div>
+      <div class="note">Drag handle reorders. Swipe-left removes from playlist. Top-right ⋮ → Rename / Delete dialog. Empty state shows a centered icon + "Tap Add songs to pick from your library."</div>
+    </div>
+
+    <!-- ========== SETTINGS ========== -->
+    <div class="cell">
+      <div class="label">09 — Settings</div>
+      <div class="frame">
+        <div class="scroll">
+          <div class="statusbar"><span>9:41</span><span class="right">·· ⌃ ▮</span></div>
+          <div class="appbar"><div class="back">‹</div><div class="title">Settings</div></div>
+
+          <div class="settings-section">
+            <div class="h">Local Wi-Fi server</div>
+            <div style="padding: 0 18px;">
+              <div style="border:1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 12px; color: var(--ink-3);">Server URL — http://192.168.1.20:8000</div>
+              <div style="text-align:right; margin-top: 8px;"><span class="pill">Save</span></div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="h">Appearance</div>
+            <div class="settings-row"><div class="radio"></div><div class="meta"><div class="a">System</div></div></div>
+            <div class="settings-row"><div class="radio"></div><div class="meta"><div class="a">Light</div></div></div>
+            <div class="settings-row"><div class="radio on"></div><div class="meta"><div class="a">Dark</div></div></div>
+            <div class="settings-row">
+              <div class="meta"><div class="a">Live wallpaper</div><div class="b">Drifting, touch-reactive blobs in the background.</div></div>
+              <div class="toggle"></div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="h">AI DJ</div>
+            <div class="settings-row">
+              <div class="meta"><div class="a">DJ voice</div><div class="b">Plays a short pre-recorded line before each track.</div></div>
+              <div class="toggle"></div>
+            </div>
+            <div class="settings-row">
+              <div class="meta"><div class="a">Default mode</div><div class="b">Smart Shuffle</div></div>
+              <div class="trail">›</div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="h">Storage</div>
+            <div class="settings-row"><div class="meta"><div class="a">Used</div></div><div class="trail">3.4 GB</div></div>
+            <div class="settings-row"><div class="meta"><div class="a">Music</div></div><div class="trail">3.1 GB</div></div>
+            <div class="settings-row"><div class="meta"><div class="a">Lyrics</div></div><div class="trail">12 MB</div></div>
+            <div class="settings-row"><div class="icon">🧹</div><div class="meta"><div class="a">Clear all downloads</div><div class="b">Files + metadata + stats + playlists</div></div></div>
+            <div class="settings-row"><div class="icon">⌛</div><div class="meta"><div class="a">Clear listening history</div><div class="b">Resets stats; favorites and playlists are kept</div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== SYNC ========== -->
+    <div class="cell">
+      <div class="label">10 — Sync <small>library import</small></div>
+      <div class="frame">
+        <div class="scroll">
+          <div class="statusbar"><span>9:41</span><span class="right">·· ⌃ ▮</span></div>
+          <div class="appbar"><div class="back">‹</div><div class="title">Sync</div></div>
+
+          <div class="pad" style="padding-top: 16px;">
+            <div class="url-pill">
+              <div class="a">Importing from</div>
+              <div class="b">http://192.168.1.20:8000</div>
+            </div>
+
+            <div class="btn-row">
+              <div class="btn">⌁ Test connection</div>
+              <div class="btn primary">⟳ Sync</div>
+            </div>
+
+            <div style="margin-top: 16px; background: var(--fill-1); border:1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 12px; color: var(--ink-2); display:flex; gap: 8px; align-items:center;">
+              <span>✓</span><span>Connected — found 124 tracks</span>
+            </div>
+
+            <div style="margin-top: 22px; background: var(--fill-1); border:1px solid var(--line); border-radius: 12px; padding: 14px;">
+              <div style="display:flex; justify-content:space-between; font-size: 12px; font-weight:700; color: var(--ink);">
+                <span>Syncing 84 / 124</span><span>67%</span>
+              </div>
+              <div style="height: 6px; background: var(--fill-2); border-radius: 999px; margin-top: 10px; position: relative; overflow:hidden;">
+                <div style="position:absolute; left:0; top:0; bottom:0; width: 67%; background: var(--ink);"></div>
+              </div>
+            </div>
+
+            <div style="font-size: 11px; letter-spacing: 0.5px; color: var(--ink-3); font-weight: 700; padding: 14px 4px 4px;">RECENT ACTIVITY</div>
+            <div class="activity-row"><span class="icon">⤓</span><span class="name">Don Toliver — Body</span><span class="pct">42%</span></div>
+            <div class="activity-row"><span class="icon">✓</span><span class="name">J. Cole — What If</span><span class="pct">ok</span></div>
+            <div class="activity-row"><span class="icon">✓</span><span class="name">Imagine Dragons — Natural</span><span class="pct">ok</span></div>
+            <div class="activity-row"><span class="icon">↷</span><span class="name">A$AP Rocky — Punk Rocky</span><span class="pct">skipped</span></div>
+            <div class="activity-row"><span class="icon">✕</span><span class="name">Drake — Treacherous Twins</span><span class="pct">failed</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="note">Saved server URL collapses into the centered "pill" at the top. Tapping it expands the URL editor again. Test / Sync buttons are disabled while a sync is running.</div>
+    </div>
+
+  </div>
+</body>
+</html>

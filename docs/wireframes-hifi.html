@@ -1,0 +1,1610 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Music App — Hi-Fi Mockups</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  /* ===========================================================
+     Lumen design tokens — sourced from app_theme.dart
+     =========================================================== */
+  :root {
+    --stage: #050507;
+    --surface: #0a0a0c;
+    --accent: #ff7aa8;          /* brand pink */
+    --orb-violet: #b8a8ff;
+    --orb-pink: #ff7eb6;
+    --orb-cyan: #5be0ff;
+    --orb-gold: #ffd36b;
+    --orb-deep: #2a1f5e;
+    --blob-purple: #6b5bff;
+    --blob-pink: #ff6b9d;
+
+    --fg: #ffffff;
+    --fg-dim: rgba(255,255,255,0.55);
+    --fg-dim-2: rgba(255,255,255,0.38);
+
+    --glass-weak: rgba(255,255,255,0.06);
+    --glass-strong: rgba(255,255,255,0.10);
+    --glass-border-weak: rgba(255,255,255,0.08);
+    --glass-border-strong: rgba(255,255,255,0.12);
+
+    --canvas: #1a1b1f;
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: var(--canvas);
+    color: #e8e8ea;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  header.page {
+    padding: 36px 40px 0;
+  }
+  header.page h1 {
+    font-size: 26px;
+    margin: 0 0 6px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    color: #fff;
+  }
+  header.page p {
+    margin: 0;
+    color: #a1a3a8;
+    max-width: 760px;
+    line-height: 1.5;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+    gap: 64px 36px;
+    padding: 40px;
+  }
+
+  .cell { display: flex; flex-direction: column; align-items: flex-start; }
+  .cell .label {
+    font-size: 11px;
+    letter-spacing: 0.7px;
+    text-transform: uppercase;
+    color: #8c8e94;
+    margin-bottom: 14px;
+    font-weight: 700;
+  }
+  .cell .label small {
+    color: #5d6066;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: 0;
+    margin-left: 8px;
+  }
+
+  /* ===========================================================
+     iPhone-shaped frame, dark stage, drifting blob accents
+     =========================================================== */
+  .frame {
+    width: 393px;
+    height: 852px;
+    border-radius: 48px;
+    overflow: hidden;
+    position: relative;
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,0.04),
+      0 30px 70px rgba(0,0,0,0.55),
+      0 6px 20px rgba(0,0,0,0.4);
+    background: var(--stage);
+    color: var(--fg);
+    font-size: 14px;
+    isolation: isolate;
+  }
+
+  /* The "stage" — drifting blurred blobs behind everything. */
+  .stage {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    z-index: 0;
+  }
+  .stage::before, .stage::after {
+    content: "";
+    position: absolute;
+    border-radius: 999px;
+    filter: blur(70px);
+    opacity: 0.55;
+  }
+  .stage::before {
+    width: 380px; height: 380px;
+    left: -110px; top: -80px;
+    background: radial-gradient(circle, var(--blob-purple), transparent 65%);
+  }
+  .stage::after {
+    width: 360px; height: 360px;
+    right: -100px; bottom: 80px;
+    background: radial-gradient(circle, var(--blob-pink), transparent 65%);
+  }
+
+  .scroll {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    z-index: 1;
+  }
+
+  /* Status bar */
+  .statusbar {
+    height: 50px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 28px 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+    position: relative;
+    z-index: 4;
+  }
+  .statusbar::after {
+    content: "";
+    position: absolute;
+    top: 12px; left: 50%;
+    transform: translateX(-50%);
+    width: 116px; height: 32px;
+    background: #000;
+    border-radius: 999px;
+  }
+  .statusbar .right {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 14px;
+  }
+  .sig, .wifi, .bat { display: inline-block; }
+  .bat {
+    width: 24px; height: 11px; border: 1.2px solid #fff; border-radius: 3px;
+    position: relative;
+  }
+  .bat::after {
+    content: ""; position: absolute; top: 2px; bottom: 2px; left: 1.5px;
+    width: 75%; background: #fff; border-radius: 1.5px;
+  }
+  .bat::before {
+    content: ""; position: absolute; right: -3px; top: 3px; bottom: 3px;
+    width: 1.5px; background: rgba(255,255,255,0.6); border-radius: 0 1.5px 1.5px 0;
+  }
+
+  /* Profile button — top-right */
+  .profile-btn {
+    position: absolute;
+    top: 64px; right: 18px;
+    width: 38px; height: 38px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.10);
+    border: 1px solid rgba(255,255,255,0.12);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 16px;
+    z-index: 6;
+  }
+
+  /* ===========================================================
+     Glass tab bar (bottom)
+     =========================================================== */
+  .tabbar {
+    position: absolute;
+    left: 16px; right: 16px;
+    bottom: 26px;
+    height: 68px;
+    border-radius: 999px;
+    background: rgba(20, 20, 24, 0.55);
+    backdrop-filter: blur(40px) saturate(180%);
+    -webkit-backdrop-filter: blur(40px) saturate(180%);
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.06),
+      0 12px 40px rgba(0,0,0,0.5);
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    padding: 0 14px;
+    z-index: 8;
+  }
+  .tab {
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    font-size: 10px; font-weight: 600;
+    color: rgba(255,255,255,0.55);
+    transition: color 0.2s;
+  }
+  .tab .ic {
+    font-size: 20px; line-height: 1;
+  }
+  .tab.active { color: #fff; }
+  .tab.accent { color: var(--accent); }
+  .tab.active.accent { color: var(--accent); text-shadow: 0 0 12px rgba(255,122,168,0.6); }
+
+  /* Mini-player — sits above tabbar */
+  .miniplayer {
+    position: absolute;
+    left: 16px; right: 16px;
+    bottom: 104px;
+    height: 64px;
+    border-radius: 18px;
+    background: rgba(20, 20, 24, 0.6);
+    backdrop-filter: blur(40px) saturate(180%);
+    -webkit-backdrop-filter: blur(40px) saturate(180%);
+    border: 1px solid rgba(255,255,255,0.08);
+    display: flex; align-items: center; padding: 8px 12px; gap: 12px;
+    z-index: 7;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+  }
+  .miniplayer .art {
+    width: 48px; height: 48px; border-radius: 10px;
+    flex-shrink: 0;
+  }
+  .miniplayer .meta { flex: 1; min-width: 0; }
+  .miniplayer .title { font-size: 13px; font-weight: 700; color: #fff; line-height: 1.2; }
+  .miniplayer .sub { font-size: 11px; color: rgba(255,255,255,0.55); margin-top: 2px; }
+  .miniplayer .play {
+    width: 36px; height: 36px; border-radius: 999px;
+    background: #fff; color: #000;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+  }
+
+  /* ===========================================================
+     Procedural "album art" via radial gradients — seeded variations
+     =========================================================== */
+  .art {
+    background: linear-gradient(135deg, var(--orb-deep), var(--orb-violet), var(--orb-pink));
+    position: relative;
+    overflow: hidden;
+  }
+  .art::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(circle at 25% 20%, rgba(255,255,255,0.45), transparent 40%),
+      radial-gradient(circle at 75% 80%, rgba(0,0,0,0.25), transparent 50%);
+    mix-blend-mode: overlay;
+  }
+  .art-1 { background: radial-gradient(circle at 30% 25%, var(--orb-violet), var(--orb-deep) 80%); }
+  .art-2 { background: radial-gradient(circle at 70% 30%, var(--orb-pink), var(--orb-deep) 75%); }
+  .art-3 { background: radial-gradient(circle at 40% 60%, var(--orb-cyan), #0F2027 75%); }
+  .art-4 { background: radial-gradient(circle at 60% 40%, var(--orb-gold), #6B2D5C 80%); }
+  .art-5 { background: radial-gradient(circle at 30% 70%, #ff8c70, #4a0e3d 80%); }
+  .art-6 { background: radial-gradient(circle at 50% 50%, #5BE0FF, #134E5E 70%); }
+  .art-7 { background: radial-gradient(circle at 70% 80%, #ffd36b, #1f2c4a 70%); }
+  .art-8 { background: radial-gradient(circle at 20% 30%, #ff7eb6, #2a1f5e 75%); }
+  .art-9 { background: radial-gradient(circle at 80% 20%, #b8a8ff, #051a3a 80%); }
+  .art-10 { background: radial-gradient(circle at 50% 70%, #ff6b9d, #6b5bff 70%, #1f1c2c 100%); }
+  .art-11 { background: radial-gradient(circle at 35% 35%, #66e0c0, #1f4068 80%); }
+  .art-12 { background: radial-gradient(circle at 65% 60%, #ff8a8a, #2c0e3a 80%); }
+
+  /* ===========================================================
+     Page-level typography (Listen Now / Tonight's Set / Library / Search)
+     =========================================================== */
+  .page-pad { padding: 0 18px; }
+  .eyebrow {
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--fg-dim-2);
+    font-weight: 700;
+    margin-top: 14px;
+  }
+  .h1 {
+    font-size: 34px;
+    line-height: 1.05;
+    letter-spacing: -1.2px;
+    font-weight: 800;
+    margin: 4px 0 0;
+    color: #fff;
+  }
+  .section {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin: 28px 0 12px;
+  }
+  .section .eb {
+    font-size: 10px;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .section .ti {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    line-height: 1.15;
+    color: #fff;
+    margin-top: 4px;
+  }
+  .section .all {
+    font-size: 13px;
+    color: var(--accent);
+    font-weight: 500;
+  }
+
+  /* ===========================================================
+     AI DJ feature card (Home)
+     =========================================================== */
+  .feature {
+    margin-top: 14px;
+    height: 192px;
+    border-radius: 24px;
+    background: rgba(255,255,255,0.06);
+    backdrop-filter: blur(30px) saturate(140%);
+    -webkit-backdrop-filter: blur(30px) saturate(140%);
+    border: 1px solid rgba(255,255,255,0.10);
+    padding: 18px;
+    position: relative;
+    overflow: hidden;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+  .feature .glow {
+    position: absolute;
+    right: -60px; top: -60px;
+    width: 220px; height: 220px;
+    background: radial-gradient(circle, var(--orb-violet), var(--orb-pink) 40%, transparent 70%);
+    filter: blur(8px);
+    opacity: 0.95;
+  }
+  .feature .lab {
+    color: var(--accent);
+    font-size: 11px; letter-spacing: 0.8px; font-weight: 700;
+    text-transform: uppercase;
+    position: relative; z-index: 2;
+  }
+  .feature .lab span { color: var(--orb-gold); }
+  .feature .head {
+    margin-top: 8px;
+    max-width: 240px;
+    font-size: 22px; line-height: 1.1;
+    font-weight: 700; letter-spacing: -0.5px;
+    color: #fff;
+    position: relative; z-index: 2;
+  }
+  .feature .cta-row {
+    position: absolute;
+    left: 18px; bottom: 18px;
+    display: flex; align-items: center; gap: 14px;
+    z-index: 2;
+  }
+  .btn-pill {
+    background: #fff; color: #000;
+    border-radius: 999px;
+    padding: 8px 16px;
+    font-size: 13px; font-weight: 700;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .wave { display: inline-flex; gap: 3px; align-items: flex-end; }
+  .wave span {
+    width: 3px; background: rgba(255,255,255,0.75);
+    border-radius: 2px;
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  .wave span:nth-child(1){ height: 10px; animation-delay: 0s;}
+  .wave span:nth-child(2){ height: 18px; animation-delay: 0.15s;}
+  .wave span:nth-child(3){ height: 8px; animation-delay: 0.3s;}
+  .wave span:nth-child(4){ height: 16px; animation-delay: 0.45s;}
+  .wave span:nth-child(5){ height: 12px; animation-delay: 0.6s;}
+  @keyframes pulse {
+    0%, 100% { transform: scaleY(0.7); }
+    50% { transform: scaleY(1); }
+  }
+
+  /* ===========================================================
+     Horizontal rails — recently played, made for you, artists
+     =========================================================== */
+  .rail {
+    display: flex;
+    gap: 14px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 18px 4px;
+    margin: 0 -18px;
+    scrollbar-width: none;
+  }
+  .rail::-webkit-scrollbar { display: none; }
+
+  /* Square art tile (recents / new for you) */
+  .tile-art { flex: 0 0 auto; width: 160px; }
+  .tile-art .art { width: 160px; height: 160px; border-radius: 14px; }
+  .tile-art .t { margin-top: 10px; font-size: 13px; font-weight: 600; color: #fff; line-height: 1.25; }
+  .tile-art .s { margin-top: 2px; font-size: 12px; color: var(--fg-dim); }
+
+  .tile-art-sm { flex: 0 0 auto; width: 140px; }
+  .tile-art-sm .art { width: 140px; height: 140px; border-radius: 12px; }
+  .tile-art-sm .t { margin-top: 10px; font-size: 13px; font-weight: 600; color: #fff; }
+  .tile-art-sm .s { margin-top: 2px; font-size: 12px; color: var(--fg-dim); }
+
+  /* Glass playlist card */
+  .tile-pl {
+    flex: 0 0 auto;
+    width: 220px;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.08);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    padding: 12px;
+  }
+  .tile-pl .art { width: 196px; height: 196px; border-radius: 10px; }
+  .tile-pl .t { margin-top: 10px; font-size: 17px; font-weight: 700; color: #fff; line-height: 1.2; }
+  .tile-pl .s { margin-top: 2px; font-size: 13px; color: var(--fg-dim); }
+
+  /* Round artist tile */
+  .tile-artist {
+    flex: 0 0 auto; width: 110px;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .tile-artist .av {
+    width: 110px; height: 110px; border-radius: 999px;
+  }
+  .tile-artist .n {
+    margin-top: 10px; font-size: 13px; font-weight: 600; color: #fff;
+    text-align: center;
+  }
+
+  /* ===========================================================
+     Library list rows
+     =========================================================== */
+  .row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 18px;
+  }
+  .row .ar { width: 48px; height: 48px; border-radius: 10px; flex-shrink: 0; }
+  .row .meta { flex: 1; min-width: 0; }
+  .row .meta .a { font-size: 15px; font-weight: 600; color: #fff; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .meta .b { font-size: 13px; color: var(--fg-dim); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .heart { color: var(--fg-dim); font-size: 18px; padding: 0 4px; }
+  .row .heart.on { color: var(--accent); }
+  .row .more { color: var(--fg-dim); font-size: 18px; padding: 0 4px; }
+  .row.playing .a { color: var(--accent); }
+  .row .equalizer { display: inline-flex; gap: 2px; align-items: flex-end; height: 14px; }
+  .row .equalizer span { width: 2px; background: var(--accent); border-radius: 1px; animation: pulse 1s ease-in-out infinite; }
+  .row .equalizer span:nth-child(1){ height: 6px; }
+  .row .equalizer span:nth-child(2){ height: 14px; animation-delay: 0.15s; }
+  .row .equalizer span:nth-child(3){ height: 9px; animation-delay: 0.3s; }
+  .row .equalizer span:nth-child(4){ height: 12px; animation-delay: 0.45s; }
+  .row .drag { color: var(--fg-dim-2); font-size: 18px; padding: 0 4px; }
+
+  /* Pills (chips) */
+  .chip {
+    display: inline-flex; align-items: center;
+    padding: 7px 14px; border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.10);
+    color: #fff; font-size: 12px; font-weight: 600;
+    white-space: nowrap;
+  }
+  .chip.active {
+    background: rgba(255,255,255,0.18);
+    border-color: rgba(255,255,255,0.25);
+  }
+  .chip.accent {
+    background: rgba(255,122,168,0.14);
+    border-color: rgba(255,122,168,0.30);
+    color: var(--accent);
+  }
+
+  /* ===========================================================
+     Search field + browse grid
+     =========================================================== */
+  .search-field {
+    margin-top: 10px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.08);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-radius: 12px;
+    padding: 12px 14px;
+    display: flex; align-items: center; gap: 10px;
+    color: var(--fg-dim);
+    font-size: 14px;
+  }
+  .search-field .ic { color: var(--fg-dim); font-size: 16px; }
+  .browse-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 14px;
+  }
+  .cat {
+    aspect-ratio: 16 / 10;
+    border-radius: 12px;
+    padding: 12px;
+    display: flex;
+    align-items: flex-end;
+    color: #fff;
+    font-weight: 800;
+    font-size: 17px;
+    box-shadow: inset 0 -1px 1px rgba(0,0,0,0.2);
+    position: relative;
+    overflow: hidden;
+  }
+  .cat::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: radial-gradient(circle at 80% 20%, rgba(255,255,255,0.25), transparent 50%);
+  }
+  .cat span { position: relative; z-index: 1; }
+  .cat-pop { background: linear-gradient(135deg, #6A0572, #FF7EB6); }
+  .cat-indie { background: linear-gradient(135deg, #134E5E, #71B280); }
+  .cat-electronic { background: linear-gradient(135deg, #430089, #82FFA1); }
+  .cat-jazz { background: linear-gradient(135deg, #D38312, #A83279); }
+  .cat-rnb { background: linear-gradient(135deg, #AB83A1, #FFB7B2); }
+  .cat-ambient { background: linear-gradient(135deg, #1F1C2C, #928DAB); }
+  .cat-hiphop { background: linear-gradient(135deg, #111111, #FF7AA8); }
+  .cat-rock { background: linear-gradient(135deg, #8B0000, #FF8C00); }
+
+  /* ===========================================================
+     Player screen (full-screen with bloom)
+     =========================================================== */
+  .player-bloom {
+    position: absolute;
+    inset: -50px;
+    z-index: 0;
+    transform: scale(1.4);
+    filter: blur(70px) saturate(160%);
+    opacity: 0.95;
+  }
+  .player-darken {
+    position: absolute; inset: 0; z-index: 1;
+    background:
+      linear-gradient(to bottom,
+        rgba(0,0,0,0.35) 0%,
+        rgba(0,0,0,0.15) 30%,
+        rgba(0,0,0,0.5) 100%);
+  }
+  .player-pad {
+    position: relative; z-index: 2;
+    height: 100%;
+    padding: 56px 22px 30px;
+    display: flex; flex-direction: column;
+  }
+  .player-header {
+    display: flex; align-items: center; gap: 10px;
+    margin-top: 8px;
+  }
+  .icon-circle {
+    width: 38px; height: 38px; border-radius: 999px;
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.10);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 18px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    flex-shrink: 0;
+  }
+  .icon-circle.heart-on { color: var(--accent); }
+  .player-header .col {
+    flex: 1; text-align: center;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+  }
+  .player-header .col .a {
+    font-size: 11px; letter-spacing: 0.8px;
+    color: rgba(255,255,255,0.6); font-weight: 600;
+    text-transform: uppercase;
+  }
+  .player-header .col .b {
+    font-size: 13px; font-weight: 700; color: #fff;
+  }
+  .player-art-wrap {
+    flex: 1;
+    display: flex; align-items: center; justify-content: center;
+    margin: 18px 0;
+  }
+  .player-art {
+    width: 320px; height: 320px;
+    border-radius: 24px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.55);
+  }
+  .player-titlebar {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .player-titlebar .col { flex: 1; min-width: 0; }
+  .player-titlebar .t {
+    font-size: 22px; font-weight: 700; color: #fff;
+    letter-spacing: -0.5px; line-height: 1.2;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .player-titlebar .s {
+    font-size: 15px; color: rgba(255,255,255,0.7);
+    margin-top: 2px;
+  }
+  .player-progress {
+    height: 4px; border-radius: 999px;
+    background: rgba(255,255,255,0.18);
+    margin: 18px 0 6px;
+    position: relative;
+  }
+  .player-progress::before {
+    content: ""; position: absolute;
+    left: 0; top: 0; bottom: 0; width: 38%;
+    background: rgba(255,255,255,0.85);
+    border-radius: 999px;
+  }
+  .player-progress::after {
+    content: ""; position: absolute;
+    left: 38%; top: -3px;
+    width: 12px; height: 12px;
+    border-radius: 999px; background: #fff;
+    transform: translateX(-6px);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  }
+  .player-times {
+    display: flex; justify-content: space-between;
+    font-size: 11px; color: rgba(255,255,255,0.5);
+    font-variant-numeric: tabular-nums;
+  }
+  .player-controls {
+    display: flex; justify-content: space-evenly; align-items: center;
+    margin: 22px 0 4px;
+  }
+  .player-controls .skip {
+    color: #fff; font-size: 32px;
+  }
+  .player-controls .play-big {
+    width: 68px; height: 68px; border-radius: 999px;
+    background: #fff; color: #000;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+  .player-secondary {
+    display: flex; justify-content: space-between;
+    padding: 0 18px; margin-top: 14px;
+  }
+  .player-secondary span {
+    color: rgba(255,255,255,0.7);
+    font-size: 22px;
+  }
+  .player-secondary span.on { color: var(--accent); }
+
+  /* ===========================================================
+     Lyrics
+     =========================================================== */
+  .lyrics-header {
+    position: relative; z-index: 2;
+    padding: 12px 16px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .lyrics-header .col { display: flex; flex-direction: column; min-width: 0; }
+  .lyrics-header .t { font-size: 16px; font-weight: 700; color: #fff; }
+  .lyrics-header .s { font-size: 13px; color: rgba(255,255,255,0.65); }
+  .lyrics-body {
+    position: relative; z-index: 2;
+    padding: 30px 28px 0;
+  }
+  .lyric {
+    padding: 11px 8px;
+    font-size: 22px; font-weight: 700;
+    letter-spacing: -0.4px; line-height: 1.25;
+    color: rgba(255,255,255,0.55);
+    transition: all 0.3s ease;
+  }
+  .lyric.past { color: rgba(255,255,255,0.30); }
+  .lyric.active {
+    color: #fff;
+    font-size: 28px;
+    font-weight: 800;
+    transform: scale(1.0);
+    padding: 14px 8px;
+  }
+  .lyric.active .word-active { color: #fff; }
+  .lyric.active .word-pending { color: rgba(255,255,255,0.55); }
+
+  /* ===========================================================
+     AI DJ orb + host bubble
+     =========================================================== */
+  .orb-big {
+    width: 200px; height: 200px;
+    margin: 12px auto;
+    border-radius: 999px;
+    background:
+      radial-gradient(circle at 30% 30%, var(--orb-violet) 0%, var(--orb-pink) 35%, var(--orb-deep) 80%);
+    box-shadow:
+      0 0 80px rgba(184, 168, 255, 0.5),
+      0 0 40px rgba(255, 126, 182, 0.4),
+      inset -20px -30px 60px rgba(0,0,0,0.3),
+      inset 10px 10px 30px rgba(255,255,255,0.2);
+    position: relative;
+  }
+  .orb-big::before {
+    content: ""; position: absolute;
+    top: 18%; left: 22%;
+    width: 36%; height: 26%;
+    border-radius: 999px;
+    background: radial-gradient(ellipse, rgba(255,255,255,0.7), transparent 70%);
+    filter: blur(2px);
+  }
+  .request-field {
+    margin-top: 12px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    padding: 12px 14px;
+    display: flex; align-items: center; gap: 10px;
+    font-size: 14px;
+    color: rgba(255,255,255,0.45);
+  }
+  .request-field .ic { color: rgba(255,255,255,0.5); }
+  .request-field .arrow { margin-left: auto; color: rgba(255,255,255,0.7); }
+  .glass-card {
+    border-radius: 22px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.08);
+    backdrop-filter: blur(30px);
+    -webkit-backdrop-filter: blur(30px);
+    padding: 16px;
+  }
+  .glass-card.strong {
+    background: rgba(255,255,255,0.10);
+    border-color: rgba(255,255,255,0.12);
+  }
+  .host-row {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .host-av {
+    width: 30px; height: 30px; border-radius: 999px;
+    background: linear-gradient(135deg, var(--orb-violet), var(--orb-pink));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; color: #fff;
+  }
+  .host-name { font-size: 13px; font-weight: 700; color: #fff; }
+  .host-text { margin-top: 12px; font-size: 15px; line-height: 1.45; font-weight: 500; color: #fff; }
+  .nowmix-card {
+    margin-top: 16px;
+    border-radius: 22px;
+    background: rgba(255,255,255,0.10);
+    border: 1px solid rgba(255,255,255,0.12);
+    backdrop-filter: blur(30px);
+    -webkit-backdrop-filter: blur(30px);
+    padding: 14px;
+    display: flex; align-items: center; gap: 14px;
+  }
+  .nowmix-card .ar { width: 64px; height: 64px; border-radius: 12px; }
+  .nowmix-card .meta { flex: 1; min-width: 0; }
+  .nowmix-card .l { font-size: 11px; letter-spacing: 0.7px; color: var(--fg-dim-2); font-weight: 700; text-transform: uppercase; }
+  .nowmix-card .t { font-size: 17px; font-weight: 700; color: #fff; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nowmix-card .s { font-size: 13px; color: var(--fg-dim); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ===========================================================
+     App bar (Settings / Sync / Playlist)
+     =========================================================== */
+  .appbar {
+    position: relative; z-index: 4;
+    height: 56px;
+    padding: 0 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .appbar .back {
+    width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 20px;
+  }
+  .appbar .title {
+    flex: 1; font-size: 18px; font-weight: 700; color: #fff;
+  }
+  .appbar .more { padding: 0 8px; color: #fff; font-size: 22px; }
+
+  /* Settings */
+  .set-section { margin-top: 18px; }
+  .set-section .h {
+    font-size: 12px;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 700;
+    padding: 0 18px 8px;
+  }
+  .set-row {
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 18px;
+  }
+  .set-row .ic { color: rgba(255,255,255,0.7); font-size: 20px; width: 24px; flex-shrink: 0; }
+  .set-row .meta { flex: 1; }
+  .set-row .meta .a { font-size: 15px; color: #fff; font-weight: 500; }
+  .set-row .meta .b { font-size: 12px; color: var(--fg-dim); margin-top: 3px; line-height: 1.4; }
+  .set-row .trail { color: var(--fg-dim); font-size: 14px; }
+  .toggle {
+    width: 44px; height: 24px; border-radius: 999px;
+    position: relative; flex-shrink: 0;
+    background: var(--accent);
+  }
+  .toggle::after {
+    content: ""; position: absolute;
+    top: 2px; right: 2px;
+    width: 20px; height: 20px;
+    border-radius: 999px;
+    background: #fff;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  }
+  .toggle.off { background: rgba(255,255,255,0.15); }
+  .toggle.off::after { left: 2px; right: auto; }
+  .radio {
+    width: 22px; height: 22px; border-radius: 999px;
+    border: 2px solid rgba(255,255,255,0.3);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .radio.on { border-color: var(--accent); }
+  .radio.on::after {
+    content: ""; width: 12px; height: 12px;
+    border-radius: 999px; background: var(--accent);
+  }
+  .divider { height: 1px; background: rgba(255,255,255,0.07); margin: 12px 18px; }
+
+  .input {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 8px;
+    padding: 14px;
+    color: #fff;
+    font-size: 14px;
+    width: 100%;
+  }
+  .input .lbl {
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  /* Sync */
+  .url-pill {
+    background: #09090B;
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px;
+    padding: 10px 14px;
+    text-align: center;
+  }
+  .url-pill .a { font-size: 12px; color: #fff; font-weight: 600; }
+  .url-pill .b { font-size: 11px; color: rgba(255,255,255,0.45); margin-top: 2px; }
+  .btn-row { display: flex; gap: 8px; margin-top: 12px; }
+  .btn {
+    flex: 1; padding: 12px;
+    border-radius: 10px;
+    font-size: 14px; font-weight: 600;
+    text-align: center;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .btn-outline {
+    border: 1px solid rgba(255,255,255,0.20);
+    color: #fff;
+  }
+  .btn-filled {
+    background: var(--accent); color: #fff;
+  }
+  .banner {
+    margin-top: 12px;
+    padding: 12px;
+    border-radius: 8px;
+    background: rgba(255,122,168,0.12);
+    border: 1px solid rgba(255,122,168,0.25);
+    display: flex; align-items: center; gap: 10px;
+    font-size: 13px;
+    color: #fff;
+  }
+  .banner .ic { color: var(--accent); font-size: 18px; }
+  .progress-card {
+    margin-top: 18px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    padding: 14px;
+  }
+  .progress-card .head { display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; color: #fff; }
+  .progress-card .bar { height: 6px; border-radius: 999px; background: rgba(255,255,255,0.10); margin-top: 12px; overflow: hidden; }
+  .progress-card .bar::before { content: ""; display: block; width: 67%; height: 100%; background: var(--accent); }
+  .activity-h { font-size: 11px; letter-spacing: 0.5px; color: var(--fg-dim); font-weight: 700; padding: 18px 4px 4px; }
+  .activity-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 4px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    font-size: 13px;
+  }
+  .activity-row .ic { font-size: 16px; }
+  .activity-row .name { flex: 1; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .activity-row .pct { color: var(--fg-dim); font-variant-numeric: tabular-nums; }
+  .activity-row.success .ic { color: var(--accent); }
+  .activity-row.failed .ic { color: #FF6B6B; }
+  .activity-row.failed .pct { color: #FF6B6B; }
+  .activity-row.skip .ic { color: var(--fg-dim); }
+
+  /* Playlist FAB */
+  .fab {
+    position: absolute;
+    right: 20px; bottom: 116px;
+    background: var(--accent); color: #fff;
+    border-radius: 999px;
+    padding: 14px 20px;
+    font-weight: 700; font-size: 14px;
+    display: flex; align-items: center; gap: 8px;
+    z-index: 6;
+    box-shadow: 0 8px 24px rgba(255,122,168,0.4);
+  }
+</style>
+</head>
+<body>
+  <header class="page">
+    <h1>Music App — Hi-Fi Mockups</h1>
+    <p>Production-fidelity recreations of all screens, using the real Lumen design tokens (pink #FF7AA8 accent, violet/pink orb gradients, glass blur surfaces, dark stage with drifting blobs). Sample songs are from your actual library.</p>
+  </header>
+
+  <div class="grid">
+
+    <!-- ========== HOME ========== -->
+    <div class="cell">
+      <div class="label">01 — Home <small>Listen Now</small></div>
+      <div class="frame">
+        <div class="stage"></div>
+        <div class="scroll">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="right"><span class="sig">·····</span><span class="wifi">⌃</span><span class="bat"></span></span>
+          </div>
+          <div class="profile-btn">◐</div>
+
+          <div class="page-pad">
+            <div class="eyebrow">Wednesday, May 3</div>
+            <h2 class="h1">Listen Now</h2>
+
+            <div class="feature">
+              <div class="glow"></div>
+              <div class="lab"><span>★</span> AI DJ</div>
+              <div class="head">Tonight's set, hosted just for you</div>
+              <div class="cta-row">
+                <div class="btn-pill">▶ Start Station</div>
+                <div class="wave"><span></span><span></span><span></span><span></span><span></span></div>
+              </div>
+            </div>
+
+            <div class="section">
+              <div>
+                <div class="eb">Recently Played</div>
+                <div class="ti">Pick up where you left off</div>
+              </div>
+            </div>
+            <div class="rail">
+              <div class="tile-art"><div class="art art-1"></div><div class="t">Treacherous Twins</div><div class="s">Drake, 21 Savage</div></div>
+              <div class="tile-art"><div class="art art-2"></div><div class="t">Tiramisu</div><div class="s">Don Toliver</div></div>
+              <div class="tile-art"><div class="art art-3"></div><div class="t">What If</div><div class="s">J. Cole</div></div>
+              <div class="tile-art"><div class="art art-4"></div><div class="t">Natural</div><div class="s">Imagine Dragons</div></div>
+            </div>
+
+            <div class="section">
+              <div>
+                <div class="eb">Made For You</div>
+                <div class="ti">Stations from your taste</div>
+              </div>
+              <div class="all">See All</div>
+            </div>
+            <div class="rail">
+              <div class="tile-pl"><div class="art art-5"></div><div class="t">Late Night Drive</div><div class="s">Playlist</div></div>
+              <div class="tile-pl"><div class="art art-6"></div><div class="t">Deep Focus</div><div class="s">Playlist</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="miniplayer">
+          <div class="art art-2"></div>
+          <div class="meta">
+            <div class="title">Tiramisu</div>
+            <div class="sub">Don Toliver</div>
+          </div>
+          <div class="play">▶</div>
+        </div>
+        <div class="tabbar">
+          <div class="tab active"><div class="ic">⌂</div>Home</div>
+          <div class="tab accent"><div class="ic">★</div>AI DJ</div>
+          <div class="tab"><div class="ic">⌕</div>Search</div>
+          <div class="tab"><div class="ic">♬</div>Library</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== AI DJ ========== -->
+    <div class="cell">
+      <div class="label">02 — AI DJ <small>Tonight's Set</small></div>
+      <div class="frame">
+        <div class="stage"></div>
+        <div class="scroll">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="right"><span class="sig">·····</span><span class="wifi">⌃</span><span class="bat"></span></span>
+          </div>
+          <div class="profile-btn">◐</div>
+
+          <div class="page-pad">
+            <div class="eyebrow" style="color: var(--accent);">★ AI DJ · LIVE</div>
+            <h2 class="h1">Tonight's Set</h2>
+            <div style="font-size: 13px; color: var(--fg-dim); margin-top: 4px;">A voice host mixing your library and a few new finds.</div>
+
+            <div class="request-field">
+              <span class="ic">✨</span>
+              <span>Tell the DJ what you want…</span>
+              <span class="arrow">→</span>
+            </div>
+
+            <div class="rail" style="margin-top: 14px; padding-bottom: 6px;">
+              <span class="chip active">Smart Shuffle</span>
+              <span class="chip">Study</span>
+              <span class="chip">Chill</span>
+              <span class="chip">Workout</span>
+              <span class="chip">Night</span>
+              <span class="chip">Discover</span>
+            </div>
+
+            <div class="orb-big"></div>
+
+            <div style="text-align: center; margin: 4px 0 18px;">
+              <span class="btn-pill" style="padding: 12px 22px; font-size: 14px;">▶ Start the set</span>
+            </div>
+
+            <div class="glass-card">
+              <div class="host-row">
+                <div class="host-av">🎙</div>
+                <div class="host-name">Host</div>
+                <div style="margin-left: auto;" class="wave">
+                  <span style="background: var(--accent);"></span>
+                  <span style="background: var(--accent);"></span>
+                  <span style="background: var(--accent);"></span>
+                  <span style="background: var(--accent);"></span>
+                </div>
+              </div>
+              <div class="host-text">Easing into the night with a Don Toliver run — visualizers and B-sides, then a J. Cole stretch to keep it deep.</div>
+            </div>
+
+            <div class="nowmix-card">
+              <div class="ar art art-2"></div>
+              <div class="meta">
+                <div class="l">Now Mixing</div>
+                <div class="t">Tiramisu</div>
+                <div class="s">Don Toliver · Hardstone Psycho</div>
+              </div>
+              <div class="icon-circle">▶</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="miniplayer">
+          <div class="art art-2"></div>
+          <div class="meta">
+            <div class="title">Tiramisu</div>
+            <div class="sub">Don Toliver</div>
+          </div>
+          <div class="play">▶</div>
+        </div>
+        <div class="tabbar">
+          <div class="tab"><div class="ic">⌂</div>Home</div>
+          <div class="tab active accent"><div class="ic">★</div>AI DJ</div>
+          <div class="tab"><div class="ic">⌕</div>Search</div>
+          <div class="tab"><div class="ic">♬</div>Library</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== SEARCH ========== -->
+    <div class="cell">
+      <div class="label">03 — Search</div>
+      <div class="frame">
+        <div class="stage"></div>
+        <div class="scroll">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="right"><span class="sig">·····</span><span class="wifi">⌃</span><span class="bat"></span></span>
+          </div>
+          <div class="profile-btn">◐</div>
+
+          <div class="page-pad">
+            <h2 class="h1" style="margin-top: 14px;">Search</h2>
+
+            <div class="search-field">
+              <span class="ic">⌕</span>
+              <span>Artists, songs, lyrics, and more</span>
+            </div>
+
+            <div class="section">
+              <div class="ti" style="font-size: 22px;">Browse Categories</div>
+            </div>
+            <div class="browse-grid">
+              <div class="cat cat-pop"><span>Pop</span></div>
+              <div class="cat cat-indie"><span>Indie</span></div>
+              <div class="cat cat-electronic"><span>Electronic</span></div>
+              <div class="cat cat-jazz"><span>Jazz</span></div>
+              <div class="cat cat-rnb"><span>R&amp;B</span></div>
+              <div class="cat cat-ambient"><span>Ambient</span></div>
+              <div class="cat cat-hiphop"><span>Hip-Hop</span></div>
+              <div class="cat cat-rock"><span>Rock</span></div>
+            </div>
+
+            <div class="section">
+              <div class="ti" style="font-size: 22px;">Trending in your library</div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              <div style="font-size: 14px; color: #fff;">1.&nbsp;&nbsp;Tiramisu — Don Toliver</div>
+              <div style="font-size: 14px; color: #fff;">2.&nbsp;&nbsp;Treacherous Twins — Drake</div>
+              <div style="font-size: 14px; color: #fff;">3.&nbsp;&nbsp;What If — J. Cole</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="miniplayer">
+          <div class="art art-2"></div>
+          <div class="meta">
+            <div class="title">Tiramisu</div>
+            <div class="sub">Don Toliver</div>
+          </div>
+          <div class="play">▶</div>
+        </div>
+        <div class="tabbar">
+          <div class="tab"><div class="ic">⌂</div>Home</div>
+          <div class="tab accent"><div class="ic">★</div>AI DJ</div>
+          <div class="tab active"><div class="ic">⌕</div>Search</div>
+          <div class="tab"><div class="ic">♬</div>Library</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== LIBRARY (Songs) ========== -->
+    <div class="cell">
+      <div class="label">04 — Library <small>Songs</small></div>
+      <div class="frame">
+        <div class="stage"></div>
+        <div class="scroll">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="right"><span class="sig">·····</span><span class="wifi">⌃</span><span class="bat"></span></span>
+          </div>
+          <div class="profile-btn">◐</div>
+
+          <div class="page-pad">
+            <h2 class="h1" style="margin-top: 14px;">Library</h2>
+            <div class="rail" style="margin-top: 14px; padding-bottom: 8px;">
+              <span class="chip active">Songs</span>
+              <span class="chip">Favorites</span>
+              <span class="chip">Playlists</span>
+            </div>
+          </div>
+
+          <div style="margin-top: 6px;">
+            <div class="row playing">
+              <div class="ar art art-2"></div>
+              <div class="meta"><div class="a">Tiramisu</div><div class="b">Don Toliver</div></div>
+              <div class="equalizer"><span></span><span></span><span></span><span></span></div>
+              <div class="more">···</div>
+            </div>
+            <div class="row">
+              <div class="ar art art-1"></div>
+              <div class="meta"><div class="a">Treacherous Twins</div><div class="b">Drake, 21 Savage</div></div>
+              <div class="heart on">♥</div>
+              <div class="more">···</div>
+            </div>
+            <div class="row">
+              <div class="ar art art-3"></div>
+              <div class="meta"><div class="a">What If</div><div class="b">J. Cole</div></div>
+              <div class="heart">♡</div>
+              <div class="more">···</div>
+            </div>
+            <div class="row">
+              <div class="ar art art-4"></div>
+              <div class="meta"><div class="a">Natural</div><div class="b">Imagine Dragons</div></div>
+              <div class="heart on">♥</div>
+              <div class="more">···</div>
+            </div>
+            <div class="row">
+              <div class="ar art art-5"></div>
+              <div class="meta"><div class="a">Stole Ya Flow</div><div class="b">A$AP Rocky</div></div>
+              <div class="heart">♡</div>
+              <div class="more">···</div>
+            </div>
+            <div class="row">
+              <div class="ar art art-6"></div>
+              <div class="meta"><div class="a">Body</div><div class="b">Don Toliver</div></div>
+              <div class="heart">♡</div>
+              <div class="more">···</div>
+            </div>
+            <div class="row">
+              <div class="ar art art-7"></div>
+              <div class="meta"><div class="a">Ex Appeal</div><div class="b">Baby Keem ft. Too $hort</div></div>
+              <div class="heart on">♥</div>
+              <div class="more">···</div>
+            </div>
+            <div class="row">
+              <div class="ar art art-8"></div>
+              <div class="meta"><div class="a">Run a Train</div><div class="b">J. Cole</div></div>
+              <div class="heart">♡</div>
+              <div class="more">···</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="miniplayer">
+          <div class="art art-2"></div>
+          <div class="meta">
+            <div class="title">Tiramisu</div>
+            <div class="sub">Don Toliver</div>
+          </div>
+          <div class="play">▶</div>
+        </div>
+        <div class="tabbar">
+          <div class="tab"><div class="ic">⌂</div>Home</div>
+          <div class="tab accent"><div class="ic">★</div>AI DJ</div>
+          <div class="tab"><div class="ic">⌕</div>Search</div>
+          <div class="tab active"><div class="ic">♬</div>Library</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== LIBRARY (Playlists) ========== -->
+    <div class="cell">
+      <div class="label">05 — Library <small>Playlists</small></div>
+      <div class="frame">
+        <div class="stage"></div>
+        <div class="scroll">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="right"><span class="sig">·····</span><span class="wifi">⌃</span><span class="bat"></span></span>
+          </div>
+          <div class="profile-btn">◐</div>
+
+          <div class="page-pad">
+            <h2 class="h1" style="margin-top: 14px;">Library</h2>
+            <div class="rail" style="margin-top: 14px; padding-bottom: 8px;">
+              <span class="chip">Songs</span>
+              <span class="chip">Favorites</span>
+              <span class="chip active">Playlists</span>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px;">
+              <div class="tile-pl" style="width: auto;">
+                <div class="art art-5" style="width: 100%; height: auto; aspect-ratio: 1/1;"></div>
+                <div class="t" style="font-size: 13px;">Late Night Drive</div>
+                <div class="s">Playlist</div>
+              </div>
+              <div class="tile-pl" style="width: auto;">
+                <div class="art art-6" style="width: 100%; height: auto; aspect-ratio: 1/1;"></div>
+                <div class="t" style="font-size: 13px;">Deep Focus</div>
+                <div class="s">Playlist</div>
+              </div>
+              <div class="tile-pl" style="width: auto;">
+                <div class="art art-9" style="width: 100%; height: auto; aspect-ratio: 1/1;"></div>
+                <div class="t" style="font-size: 13px;">Weekend Vibes</div>
+                <div class="s">Playlist</div>
+              </div>
+              <div class="tile-pl" style="width: auto;">
+                <div class="art art-10" style="width: 100%; height: auto; aspect-ratio: 1/1;"></div>
+                <div class="t" style="font-size: 13px;">Heavy Rotation</div>
+                <div class="s">Playlist</div>
+              </div>
+              <div class="tile-pl" style="width: auto;">
+                <div class="art art-11" style="width: 100%; height: auto; aspect-ratio: 1/1;"></div>
+                <div class="t" style="font-size: 13px;">Throwbacks</div>
+                <div class="s">Playlist</div>
+              </div>
+              <div class="tile-pl" style="width: auto;">
+                <div class="art art-12" style="width: 100%; height: auto; aspect-ratio: 1/1;"></div>
+                <div class="t" style="font-size: 13px;">For The Drive</div>
+                <div class="s">Playlist</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="miniplayer">
+          <div class="art art-2"></div>
+          <div class="meta">
+            <div class="title">Tiramisu</div>
+            <div class="sub">Don Toliver</div>
+          </div>
+          <div class="play">▶</div>
+        </div>
+        <div class="tabbar">
+          <div class="tab"><div class="ic">⌂</div>Home</div>
+          <div class="tab accent"><div class="ic">★</div>AI DJ</div>
+          <div class="tab"><div class="ic">⌕</div>Search</div>
+          <div class="tab active"><div class="ic">♬</div>Library</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== PLAYER ========== -->
+    <div class="cell">
+      <div class="label">06 — Player <small>full-screen with bloom</small></div>
+      <div class="frame">
+        <div class="player-bloom art art-2"></div>
+        <div class="player-darken"></div>
+        <div class="scroll">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="right"><span class="sig">·····</span><span class="wifi">⌃</span><span class="bat"></span></span>
+          </div>
+
+          <div class="player-pad">
+            <div class="player-header">
+              <div class="icon-circle">⌄</div>
+              <div class="col">
+                <div class="a">Playing from album</div>
+                <div class="b">Hardstone Psycho</div>
+              </div>
+              <div class="icon-circle">···</div>
+            </div>
+
+            <div class="player-art-wrap">
+              <div class="player-art art art-2"></div>
+            </div>
+
+            <div class="player-titlebar">
+              <div class="col">
+                <div class="t">Tiramisu</div>
+                <div class="s">Don Toliver</div>
+              </div>
+              <div class="icon-circle heart-on">♥</div>
+            </div>
+
+            <div class="player-progress"></div>
+            <div class="player-times">
+              <span>1:24</span>
+              <span>-2:36</span>
+            </div>
+
+            <div class="player-controls">
+              <span class="skip">⏮</span>
+              <div class="play-big">▶</div>
+              <span class="skip">⏭</span>
+            </div>
+
+            <div class="player-secondary">
+              <span>↻</span>
+              <span>♪</span>
+              <span class="on">★</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== LYRICS ========== -->
+    <div class="cell">
+      <div class="label">07 — Lyrics <small>karaoke</small></div>
+      <div class="frame">
+        <div class="player-bloom art art-2"></div>
+        <div class="player-darken" style="background: linear-gradient(to bottom, rgba(0,0,0,0.55), rgba(0,0,0,0.4) 50%, rgba(0,0,0,0.65));"></div>
+        <div class="scroll">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="right"><span class="sig">·····</span><span class="wifi">⌃</span><span class="bat"></span></span>
+          </div>
+
+          <div class="lyrics-header">
+            <div class="icon-circle">⌄</div>
+            <div class="col">
+              <div class="t">Tiramisu</div>
+              <div class="s">Don Toliver</div>
+            </div>
+          </div>
+
+          <div class="lyrics-body">
+            <div class="lyric past">Came up out the projects</div>
+            <div class="lyric past">Trapped inside the matrix</div>
+            <div class="lyric past">Now I'm on a rocket</div>
+            <div class="lyric active"><span class="word-active">Said she </span><span class="word-pending">want a tiramisu</span></div>
+            <div class="lyric">Pulled up in the new one</div>
+            <div class="lyric">Diamonds on me, two-tone</div>
+            <div class="lyric">She said baby, take me home</div>
+            <div class="lyric">Roll the windows down</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== PLAYLIST DETAIL ========== -->
+    <div class="cell">
+      <div class="label">08 — Playlist Detail</div>
+      <div class="frame">
+        <div class="stage"></div>
+        <div class="scroll">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="right"><span class="sig">·····</span><span class="wifi">⌃</span><span class="bat"></span></span>
+          </div>
+
+          <div class="appbar">
+            <div class="back">‹</div>
+            <div class="title">Late Night Drive</div>
+            <div class="more">⋮</div>
+          </div>
+
+          <div style="padding: 0 18px; display: flex; gap: 16px; margin-top: 6px;">
+            <div class="art art-5" style="width: 130px; height: 130px; border-radius: 14px; box-shadow: 0 12px 32px rgba(0,0,0,0.5);"></div>
+            <div style="flex: 1; display: flex; flex-direction: column; justify-content: center;">
+              <div style="font-size: 11px; letter-spacing: 0.7px; text-transform: uppercase; color: var(--fg-dim-2); font-weight: 700;">Playlist</div>
+              <div style="font-size: 22px; font-weight: 800; line-height: 1.15; margin-top: 4px;">Late Night Drive</div>
+              <div style="font-size: 13px; color: var(--fg-dim); margin-top: 4px;">14 songs · 52 min</div>
+              <div class="btn-pill" style="margin-top: 14px; width: fit-content;">▶ Play</div>
+            </div>
+          </div>
+
+          <div style="margin-top: 16px;">
+            <div class="row">
+              <div class="ar art art-2"></div>
+              <div class="meta"><div class="a">Tiramisu</div><div class="b">Don Toliver</div></div>
+              <div class="drag">≡</div>
+            </div>
+            <div class="row">
+              <div class="ar art art-5"></div>
+              <div class="meta"><div class="a">Stole Ya Flow</div><div class="b">A$AP Rocky</div></div>
+              <div class="drag">≡</div>
+            </div>
+            <div class="row">
+              <div class="ar art art-6"></div>
+              <div class="meta"><div class="a">Body</div><div class="b">Don Toliver</div></div>
+              <div class="drag">≡</div>
+            </div>
+            <div class="row">
+              <div class="ar art art-7"></div>
+              <div class="meta"><div class="a">Ex Appeal</div><div class="b">Baby Keem ft. Too $hort</div></div>
+              <div class="drag">≡</div>
+            </div>
+            <div class="row">
+              <div class="ar art art-8"></div>
+              <div class="meta"><div class="a">Run a Train</div><div class="b">J. Cole</div></div>
+              <div class="drag">≡</div>
+            </div>
+            <div class="row">
+              <div class="ar art art-1"></div>
+              <div class="meta"><div class="a">Treacherous Twins</div><div class="b">Drake, 21 Savage</div></div>
+              <div class="drag">≡</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="fab">＋ Add songs</div>
+      </div>
+    </div>
+
+    <!-- ========== SETTINGS ========== -->
+    <div class="cell">
+      <div class="label">09 — Settings</div>
+      <div class="frame">
+        <div class="stage"></div>
+        <div class="scroll">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="right"><span class="sig">·····</span><span class="wifi">⌃</span><span class="bat"></span></span>
+          </div>
+
+          <div class="appbar"><div class="back">‹</div><div class="title">Settings</div></div>
+
+          <div class="set-section">
+            <div class="h">Local Wi-Fi server</div>
+            <div style="padding: 0 18px;">
+              <div class="input">
+                <div class="lbl">Server URL</div>
+                http://192.168.1.20:8000
+              </div>
+              <div style="text-align: right; margin-top: 10px;">
+                <span class="chip" style="background: rgba(255,122,168,0.2); border-color: rgba(255,122,168,0.35); color: var(--accent);">Save</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="set-section">
+            <div class="h">Appearance</div>
+            <div class="set-row">
+              <div class="radio"></div>
+              <div class="meta"><div class="a">System</div></div>
+            </div>
+            <div class="set-row">
+              <div class="radio"></div>
+              <div class="meta"><div class="a">Light</div></div>
+            </div>
+            <div class="set-row">
+              <div class="radio on"></div>
+              <div class="meta"><div class="a">Dark</div></div>
+            </div>
+            <div class="set-row">
+              <div class="meta">
+                <div class="a">Live wallpaper</div>
+                <div class="b">Drifting, touch-reactive blobs in the background.</div>
+              </div>
+              <div class="toggle"></div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="set-section">
+            <div class="h">AI DJ</div>
+            <div class="set-row">
+              <div class="meta">
+                <div class="a">DJ voice</div>
+                <div class="b">Plays a short pre-recorded line before each track.</div>
+              </div>
+              <div class="toggle"></div>
+            </div>
+            <div class="set-row">
+              <div class="meta"><div class="a">Default mode</div><div class="b">Smart Shuffle</div></div>
+              <div class="trail">›</div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="set-section">
+            <div class="h">Storage</div>
+            <div class="set-row"><div class="meta"><div class="a">Used</div></div><div class="trail">3.4 GB</div></div>
+            <div class="set-row"><div class="meta"><div class="a">Music</div></div><div class="trail">3.1 GB</div></div>
+            <div class="set-row"><div class="meta"><div class="a">Lyrics</div></div><div class="trail">12 MB</div></div>
+            <div class="set-row">
+              <div class="ic">🧹</div>
+              <div class="meta">
+                <div class="a">Clear all downloads</div>
+                <div class="b">Files + metadata + stats + playlists</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== SYNC ========== -->
+    <div class="cell">
+      <div class="label">10 — Sync</div>
+      <div class="frame">
+        <div class="stage"></div>
+        <div class="scroll">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="right"><span class="sig">·····</span><span class="wifi">⌃</span><span class="bat"></span></span>
+          </div>
+
+          <div class="appbar"><div class="back">‹</div><div class="title">Sync</div></div>
+
+          <div style="padding: 8px 16px 0;">
+            <div class="url-pill">
+              <div class="a">Importing from</div>
+              <div class="b">http://192.168.1.20:8000</div>
+            </div>
+
+            <div class="btn-row">
+              <div class="btn btn-outline">⌁ Test connection</div>
+              <div class="btn btn-filled">⟳ Sync</div>
+            </div>
+
+            <div class="banner">
+              <span class="ic">✓</span>
+              <span>Connected — found 124 tracks</span>
+            </div>
+
+            <div class="progress-card">
+              <div class="head">
+                <span>Syncing 84 / 124</span>
+                <span>67%</span>
+              </div>
+              <div class="bar"></div>
+            </div>
+
+            <div class="activity-h">RECENT ACTIVITY</div>
+            <div class="activity-row"><span class="ic" style="color: var(--accent);">⤓</span><span class="name">Don Toliver — Body</span><span class="pct">42%</span></div>
+            <div class="activity-row success"><span class="ic">✓</span><span class="name">J. Cole — What If</span><span class="pct">ok</span></div>
+            <div class="activity-row success"><span class="ic">✓</span><span class="name">Imagine Dragons — Natural</span><span class="pct">ok</span></div>
+            <div class="activity-row success"><span class="ic">✓</span><span class="name">Drake — First Person Shooter</span><span class="pct">ok</span></div>
+            <div class="activity-row skip"><span class="ic">↷</span><span class="name">A$AP Rocky — Punk Rocky</span><span class="pct">skipped</span></div>
+            <div class="activity-row failed"><span class="ic">✕</span><span class="name">Drake — Treacherous Twins</span><span class="pct">failed</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>

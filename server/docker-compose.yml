@@ -1,0 +1,45 @@
+services:
+  music-server:
+    image: nginx:1.27-alpine
+    container_name: music-server
+    restart: unless-stopped
+    ports:
+      - "8000:80"
+    volumes:
+      - ./content:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+  # Bulk-import audio files into ./content. Opt-in via the "tools" profile,
+  # so it doesn't start with `docker compose up`.
+  #
+  # Drop files into ./import (or set IMPORT_DIR=/path/to/source) then run:
+  #     docker compose --profile tools run --rm importer
+  importer:
+    build: ./importer
+    profiles: ["tools"]
+    volumes:
+      - ${IMPORT_DIR:-../songs}:/in:ro
+      - ./content:/out
+    # BASE_URL flows from the host shell straight into the script's
+    # --base-url flag so the regenerated manifest has resolvable URLs.
+    # Without it the manifest gets `__BASE_URL__` placeholders that the
+    # Flutter app can't dereference. Default `http://localhost:8000` is
+    # only useful for inside-Docker testing — set BASE_URL to your LAN
+    # IP so the phone can actually reach the server.
+    command:
+      - "--source=/in"
+      - "--content=/out"
+      - "--base-url=${BASE_URL:-http://localhost:8000}"
+
+  # Auto-repair pass: cleans cruft out of sidecar titles, fetches missing
+  # artwork from iTunes Search, and fetches missing time-synced lyrics from
+  # LRCLib. Idempotent — re-running only acts on songs that lack the asset.
+  #
+  #     docker compose --profile tools run --rm repair
+  #     docker compose --profile tools run --rm repair --only=lyrics
+  #     docker compose --profile tools run --rm repair --base-url http://192.168.1.20:8000
+  repair:
+    build: ./repair
+    profiles: ["tools"]
+    volumes:
+      - ./content:/content
