@@ -1,11 +1,22 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/services/providers.dart';
 import '../../data/database/providers.dart';
 import '../../features/ai_dj/dj_mode.dart';
+import '../../features/importer/import_providers.dart';
+import '../../features/importer/import_service.dart';
 import '../../features/library/storage_info.dart';
 import '../../features/sync/providers.dart';
+
+/// (done, total, currentName) snapshot driven by the importer's
+/// per-file callback. Held in a `ValueNotifier` so only the dialog
+/// rebuilds as files stream in.
+typedef _ImportTick = ({int done, int total, String currentName});
 
 final _storageInfoProvider = FutureProvider.autoDispose<StorageInfo>((ref) {
   return StorageInspector().compute();
@@ -23,9 +34,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _initialized = false;
   bool _saved = false;
 
+  /// Live progress for the running import (null when idle). The progress
+  /// dialog watches this notifier so the per-file callback doesn't
+  /// rebuild the rest of the settings tree.
+  final ValueNotifier<_ImportTick?> _importProgress =
+      ValueNotifier<_ImportTick?>(null);
+
   @override
   void dispose() {
     _urlController.dispose();
+    _importProgress.dispose();
     super.dispose();
   }
 
@@ -106,6 +124,105 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     messenger.showSnackBar(
       const SnackBar(content: Text('History cleared')),
     );
+  }
+
+  Future<void> _importFiles() async {
+    final FilePickerResult? picked;
+    try {
+      picked = await FilePicker.platform.pickFiles(
+        type: FileType.audio,
+        allowMultiple: true,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Picker failed: $e')),
+      );
+      return;
+    }
+    if (picked == null || picked.paths.isEmpty) return;
+    final files = picked.paths
+        .whereType<String>()
+        .map((path) => File(path))
+        .toList();
+    if (files.isEmpty || !mounted) return;
+    await _runImport(
+      (service) => service.importFiles(files, onProgress: _onTick),
+    );
+  }
+
+  Future<void> _importFolder() async {
+    final String? folderPath;
+    try {
+      folderPath = await FilePicker.platform.getDirectoryPath();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Folder picker failed: $e')),
+      );
+      return;
+    }
+    if (folderPath == null || !mounted) return;
+    await _runImport(
+      (service) => service.importFolder(
+        Directory(folderPath!),
+        onProgress: _onTick,
+      ),
+    );
+  }
+
+  void _onTick(int done, int total, String currentName) {
+    _importProgress.value = (
+      done: done,
+      total: total,
+      currentName: currentName,
+    );
+  }
+
+  /// Shared scaffolding for both import flavours: opens the progress
+  /// dialog, runs the import, closes the dialog, and reports the
+  /// outcome as a snackbar.
+  Future<void> _runImport(
+    Future<ImportResult> Function(ImportService service) run,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final service = ref.read(importServiceProvider);
+    _importProgress.value = (done: 0, total: 0, currentName: 'Preparing…');
+    final dialogFuture = showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _ImportProgressDialog(progress: _importProgress),
+    );
+
+    ImportResult? result;
+    Object? failure;
+    try {
+      result = await run(service);
+    } catch (e) {
+      failure = e;
+    }
+
+    if (mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+    await dialogFuture; // wait for the pop to settle.
+
+    if (!mounted) return;
+    if (failure != null) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Import failed: $failure')),
+      );
+      return;
+    }
+    final r = result!;
+    final parts = <String>[
+      'Added ${r.added} ${r.added == 1 ? 'song' : 'songs'}',
+      if (r.skipped > 0)
+        'skipped ${r.skipped} duplicate${r.skipped == 1 ? '' : 's'}',
+      if (r.errors.isNotEmpty)
+        '${r.errors.length} error${r.errors.length == 1 ? '' : 's'}',
+    ];
+    messenger.showSnackBar(SnackBar(content: Text(parts.join(', '))));
   }
 
   @override
@@ -271,6 +388,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             onTap: _clearHistory,
           ),
           const Divider(height: 32),
+          _SectionHeader(text: 'Import from device'),
+          ListTile(
+            leading: const Icon(Icons.audio_file_outlined),
+            title: const Text('Import audio files'),
+            subtitle: const Text(
+              'Pick mp3 / m4a / flac / wav / ogg files from this device',
+            ),
+            onTap: _importFiles,
+          ),
+          ListTile(
+            leading: const Icon(Icons.folder_open_outlined),
+            title: const Text('Import folder'),
+            subtitle: const Text(
+              'Recursively scans a folder for audio and imports each file',
+            ),
+            onTap: _importFolder,
+          ),
+          const Divider(height: 32),
           _SectionHeader(text: 'About'),
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 0, 16, 24),
@@ -302,6 +437,60 @@ class _SectionHeader extends StatelessWidget {
           fontWeight: FontWeight.w600,
           letterSpacing: 0.5,
           color: Theme.of(context).colorScheme.primary,
+        ),
+      ),
+    );
+  }
+}
+
+class _ImportProgressDialog extends StatelessWidget {
+  const _ImportProgressDialog({required this.progress});
+
+  final ValueListenable<_ImportTick?> progress;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Importing'),
+      content: SizedBox(
+        width: 320,
+        child: ValueListenableBuilder<_ImportTick?>(
+          valueListenable: progress,
+          builder: (context, tick, _) {
+            final t = tick;
+            if (t == null) {
+              return const SizedBox(
+                height: 60,
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+            final ratio = t.total > 0 ? t.done / t.total : null;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                LinearProgressIndicator(value: ratio),
+                const SizedBox(height: 14),
+                Text(
+                  t.currentName.isEmpty ? 'Finishing…' : t.currentName,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  t.total > 0 ? '${t.done} / ${t.total}' : '',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color:
+                        Theme.of(context).colorScheme.onSurface.withValues(
+                          alpha: 0.65,
+                        ),
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
