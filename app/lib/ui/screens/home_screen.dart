@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/database/app_database.dart';
+import '../../features/library/album_colors_provider.dart';
 import '../../features/library/home_providers.dart';
 import '../../features/library/providers.dart';
 import '../../features/playlists/providers.dart';
@@ -37,11 +38,12 @@ class HomeScreen extends ConsumerWidget {
   Future<void> _open(
     BuildContext context,
     WidgetRef ref,
-    SongRow song,
+    List<SongRow> queue,
+    int index,
   ) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await ref.read(nowPlayingProvider.notifier).playSong(song);
+      await ref.read(nowPlayingProvider.notifier).playFromQueue(queue, index);
     } catch (e) {
       messenger.showSnackBar(
         SnackBar(content: Text('Could not play file: $e')),
@@ -164,7 +166,7 @@ class HomeScreen extends ConsumerWidget {
                   songs: quickPicks,
                   currentSongId: currentSong?.id,
                   isPlaying: isPlaying,
-                  onTap: (s) => _open(context, ref, s),
+                  onTap: (queue, i) => _open(context, ref, queue, i),
                 ),
             ],
           ),
@@ -173,7 +175,7 @@ class HomeScreen extends ConsumerWidget {
         if (pickupPages.isNotEmpty)
           _SwipeableGlassList(
             pages: pickupPages,
-            onTap: (s) => _open(context, ref, s),
+            onTap: (queue, i) => _open(context, ref, queue, i),
           ),
 
         _PlaylistsRail(
@@ -274,7 +276,10 @@ class _QuickPicks extends StatefulWidget {
   final List<SongRow> songs;
   final String? currentSongId;
   final bool isPlaying;
-  final ValueChanged<SongRow> onTap;
+
+  /// Fires with `(queue, index)` so the player can populate a real queue
+  /// (and so prev/next buttons stay enabled while playing the row).
+  final void Function(List<SongRow> queue, int index) onTap;
 
   static const _cols = 1;
   static const _rows = 4;
@@ -332,7 +337,11 @@ class _QuickPicksState extends State<_QuickPicks> {
             controller: _ctrl,
             padEnds: false,
             itemBuilder: (context, pi) {
-              final pageSongs = pages[(pi - _initialPage) % pages.length];
+              final actualPageIndex =
+                  (pi - _initialPage) % pages.length;
+              final pageSongs = pages[actualPageIndex];
+              final pageStart =
+                  actualPageIndex * _QuickPicks._perPage;
               final isLight = Theme.of(context).brightness == Brightness.light;
               return Padding(
                 padding: const EdgeInsets.symmetric(
@@ -372,8 +381,12 @@ class _QuickPicksState extends State<_QuickPicks> {
                                                       r]
                                                   .id,
                                           playing: widget.isPlaying,
-                                          onTap: () => widget.onTap(pageSongs[
-                                              c * _QuickPicks._rows + r]),
+                                          onTap: () => widget.onTap(
+                                            widget.songs,
+                                            pageStart +
+                                                c * _QuickPicks._rows +
+                                                r,
+                                          ),
                                         )
                                       : const SizedBox.expand(),
                                 ),
@@ -395,7 +408,7 @@ class _QuickPicksState extends State<_QuickPicks> {
   }
 }
 
-class _SongRow extends StatelessWidget {
+class _SongRow extends ConsumerWidget {
   const _SongRow({
     required this.song,
     required this.active,
@@ -408,7 +421,25 @@ class _SongRow extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Active rows pick up the song's own dominant artwork colour instead
+    // of the global pink accent. Clamp saturation/lightness so washed-out
+    // covers don't fade into the background and oversaturated ones don't
+    // glare on top of the glass surface.
+    Color tint = LumenTokens.accent;
+    if (active) {
+      final colors = ref
+          .watch(albumColorsProvider(song.localArtworkPath))
+          .valueOrNull;
+      if (colors != null && colors.isNotEmpty) {
+        final hsl = HSLColor.fromColor(colors.first);
+        tint = hsl
+            .withSaturation(hsl.saturation.clamp(0.55, 0.95))
+            .withLightness(hsl.lightness.clamp(0.58, 0.74))
+            .toColor();
+      }
+    }
+
     final row = InkWell(
       borderRadius: BorderRadius.circular(LumenTokens.rXs),
       onTap: onTap,
@@ -437,7 +468,7 @@ class _SongRow extends StatelessWidget {
                       fontSize: 15,
                       fontWeight: active ? FontWeight.w800 : FontWeight.w700,
                       height: 1.2,
-                      color: active ? LumenTokens.accent : null,
+                      color: active ? tint : null,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -447,15 +478,15 @@ class _SongRow extends StatelessWidget {
                         Icon(
                           playing ? Icons.graphic_eq : Icons.pause_circle_filled,
                           size: 14,
-                          color: LumenTokens.accent,
+                          color: tint,
                         ),
                         const SizedBox(width: 5),
                         Text(
                           playing ? 'Playing' : 'Paused',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 11.5,
                             fontWeight: FontWeight.w800,
-                            color: LumenTokens.accent,
+                            color: tint,
                           ),
                         ),
                         const SizedBox(width: 6),
@@ -663,7 +694,11 @@ class _GlassListPage {
 class _SwipeableGlassList extends StatefulWidget {
   const _SwipeableGlassList({required this.pages, required this.onTap});
   final List<_GlassListPage> pages;
-  final ValueChanged<SongRow> onTap;
+
+  /// Fires with `(queue, index)`. Each page treats its own song list as
+  /// the queue so prev/next walk that page rather than escaping to
+  /// neighbouring pages.
+  final void Function(List<SongRow> queue, int index) onTap;
 
   @override
   State<_SwipeableGlassList> createState() => _SwipeableGlassListState();
@@ -760,7 +795,7 @@ class _SwipeableGlassListState extends State<_SwipeableGlassList> {
 class _GlassListContent extends StatelessWidget {
   const _GlassListContent({required this.songs, required this.onTap});
   final List<SongRow> songs;
-  final ValueChanged<SongRow> onTap;
+  final void Function(List<SongRow> queue, int index) onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -770,10 +805,18 @@ class _GlassListContent extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          for (final s in songs)
-            InkWell(
+          for (var i = 0; i < songs.length; i++)
+            _glassRow(context, songs, i),
+        ],
+      ),
+    );
+  }
+
+  Widget _glassRow(BuildContext context, List<SongRow> songs, int i) {
+    final s = songs[i];
+    return InkWell(
               borderRadius: BorderRadius.circular(LumenTokens.rXs),
-              onTap: () => onTap(s),
+              onTap: () => onTap(songs, i),
               child: Padding(
                 padding: const EdgeInsets.all(8),
                 child: Row(
@@ -821,10 +864,7 @@ class _GlassListContent extends StatelessWidget {
                   ],
                 ),
               ),
-            ),
-        ],
-      ),
-    );
+            );
   }
 }
 

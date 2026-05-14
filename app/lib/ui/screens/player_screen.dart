@@ -1,10 +1,8 @@
-import 'dart:io';
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 
+import '../../core/utils/album_colors.dart';
 import '../../features/ai_dj/providers.dart';
 import '../../features/library/library_actions.dart';
 import '../../features/player/now_playing_controller.dart';
@@ -49,8 +47,10 @@ String _formatDuration(Duration d) {
 class _PlayerScreenState extends ConsumerState<PlayerScreen>
     with SingleTickerProviderStateMixin {
   /// Live downward-drag offset for swipe-to-dismiss. 0 = at rest. Past a
-  /// threshold or with enough downward velocity, the route pops.
-  double _dragOffset = 0;
+  /// threshold or with enough downward velocity, the route pops. Held in
+  /// a `ValueNotifier` so only the transform subtree rebuilds during
+  /// drag, not the bloom/glass tree underneath.
+  final ValueNotifier<double> _drag = ValueNotifier<double>(0);
   Color _controlColor = _playerControlFallbackColor;
   String? _controlColorSongId;
   int _colorRequest = 0;
@@ -65,30 +65,29 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       duration: const Duration(milliseconds: 220),
     )..addListener(() {
         final a = _settleAnim;
-        if (a != null) setState(() => _dragOffset = a.value);
+        if (a != null) _drag.value = a.value;
       });
   }
 
   @override
   void dispose() {
     _settle.dispose();
+    _drag.dispose();
     super.dispose();
   }
 
   void _onDragUpdate(DragUpdateDetails d) {
-    setState(() {
-      _dragOffset = (_dragOffset + d.delta.dy).clamp(0.0, double.infinity);
-    });
+    _drag.value = (_drag.value + d.delta.dy).clamp(0.0, double.infinity);
   }
 
   Future<void> _onDragEnd(DragEndDetails d) async {
     final v = d.velocity.pixelsPerSecond.dy;
     final h = MediaQuery.of(context).size.height;
-    if (_dragOffset > h * 0.18 || v > 800) {
+    if (_drag.value > h * 0.18 || v > 800) {
       if (mounted) Navigator.of(context).maybePop();
       return;
     }
-    _settleAnim = Tween<double>(begin: _dragOffset, end: 0).animate(
+    _settleAnim = Tween<double>(begin: _drag.value, end: 0).animate(
       CurvedAnimation(parent: _settle, curve: Curves.easeOutCubic),
     );
     _settle.value = 0;
@@ -104,44 +103,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   Future<Color> _extractArtworkColor(String? artworkPath) async {
     if (artworkPath == null) return _playerControlFallbackColor;
-    final file = File(artworkPath);
-    if (!file.existsSync()) return _playerControlFallbackColor;
     try {
-      final bytes = await file.readAsBytes();
-      final codec = await ui.instantiateImageCodec(
-        bytes,
-        targetWidth: 24,
-        targetHeight: 24,
-      );
-      final frame = await codec.getNextFrame();
-      final data = await frame.image.toByteData(format: ui.ImageByteFormat.rawRgba);
-      if (data == null) return _playerControlFallbackColor;
-
-      Color best = _playerControlFallbackColor;
-      var bestScore = -1.0;
-      for (var i = 0; i < data.lengthInBytes; i += 4) {
-        final alpha = data.getUint8(i + 3);
-        if (alpha < 200) continue;
-        final color = Color.fromARGB(
-          alpha,
-          data.getUint8(i),
-          data.getUint8(i + 1),
-          data.getUint8(i + 2),
-        );
-        final hsl = HSLColor.fromColor(color);
-        final saturation = hsl.saturation;
-        final lightness = hsl.lightness;
-        if (lightness < 0.14 || lightness > 0.92) continue;
-        final score = saturation * 0.70 + (1 - (lightness - 0.58).abs()) * 0.30;
-        if (score > bestScore) {
-          bestScore = score;
-          best = hsl
-              .withSaturation(saturation.clamp(0.50, 0.88))
-              .withLightness(lightness.clamp(0.58, 0.74))
-              .toColor();
-        }
+      // Reuse the bloom-background palette extractor so the transport
+      // tint matches the rest of the screen. The dominant bucket is
+      // already de-noised (population gate + dark-but-saturated pass),
+      // so clamping it into a button-legible range is enough here.
+      final colors = await AlbumColors.extract(artworkPath);
+      if (colors.isEmpty || identical(colors, AlbumColors.fallback)) {
+        return _playerControlFallbackColor;
       }
-      return best;
+      final hsl = HSLColor.fromColor(colors.first);
+      return hsl
+          .withSaturation(hsl.saturation.clamp(0.50, 0.88))
+          .withLightness(hsl.lightness.clamp(0.58, 0.74))
+          .toColor();
     } catch (_) {
       return _playerControlFallbackColor;
     }
@@ -179,9 +154,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     }
 
     final h = MediaQuery.of(context).size.height;
-    final progress = (_dragOffset / (h * 0.5)).clamp(0.0, 1.0);
-    final scale = 1.0 - 0.05 * progress;
-    final radius = 28.0 * progress;
 
     return Scaffold(
       // Solid black bg so the player itself is never see-through. The
@@ -193,15 +165,24 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         behavior: HitTestBehavior.translucent,
         onVerticalDragUpdate: _onDragUpdate,
         onVerticalDragEnd: _onDragEnd,
-        child: Transform.translate(
-          offset: Offset(0, _dragOffset),
-          child: Transform.scale(
-            scale: scale,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(radius),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
+        child: ValueListenableBuilder<double>(
+          valueListenable: _drag,
+          builder: (context, drag, child) {
+            final progress = (drag / (h * 0.5)).clamp(0.0, 1.0);
+            return Transform.translate(
+              offset: Offset(0, drag),
+              child: Transform.scale(
+                scale: 1.0 - 0.05 * progress,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(28.0 * progress),
+                  child: child,
+                ),
+              ),
+            );
+          },
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
                   // Art-bloom background — heavily blurred fullscreen artwork.
                   Positioned.fill(child: BloomBackground(song: song)),
                   SafeArea(
@@ -264,6 +245,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                                     constraints:
                                         const BoxConstraints(maxWidth: 370),
                                     child: Glass(
+                                      blur: false,
                                       borderRadius: LumenTokens.rXl,
                                       padding: const EdgeInsets.all(18),
                                       child: Column(
@@ -319,18 +301,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                                             ),
                                           ),
                                           const SizedBox(height: 22),
-                                          Text(
-                                            song.title,
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              fontSize: 30,
-                                              fontWeight: FontWeight.w900,
-                                              letterSpacing: -0.8,
-                                              height: 1.08,
-                                              color: Colors.white,
-                                            ),
-                                          ),
+                                          _FitTitle(text: song.title),
                                           const SizedBox(height: 12),
                                           Row(
                                             children: [
@@ -469,8 +440,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                   ),
                 ],
               ),
-            ),
-          ),
         ),
       ),
     );
@@ -718,6 +687,48 @@ class _ProgressBar extends ConsumerWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Title that shrinks its font size until it fits on a single line. Picks
+/// the largest size in [_maxSize..[_minSize]] that doesn't wrap; if even
+/// the minimum overflows, it falls back to ellipsis.
+class _FitTitle extends StatelessWidget {
+  const _FitTitle({required this.text});
+
+  final String text;
+
+  static const double _maxSize = 30;
+  static const double _minSize = 18;
+  static const TextStyle _baseStyle = TextStyle(
+    fontWeight: FontWeight.w900,
+    letterSpacing: -0.8,
+    height: 1.08,
+    color: Colors.white,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        double size = _maxSize;
+        for (; size > _minSize; size -= 1.0) {
+          final tp = TextPainter(
+            text: TextSpan(
+                text: text, style: _baseStyle.copyWith(fontSize: size)),
+            textDirection: TextDirection.ltr,
+            maxLines: 1,
+          )..layout(maxWidth: constraints.maxWidth);
+          if (!tp.didExceedMaxLines) break;
+        }
+        return Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: _baseStyle.copyWith(fontSize: size),
+        );
+      },
     );
   }
 }

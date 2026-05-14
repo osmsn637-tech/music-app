@@ -42,10 +42,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     ref.read(librarySearchControllerProvider.notifier).onQueryChanged(q);
   }
 
-  Future<void> _open(SongRow song) async {
+  Future<void> _open(List<SongRow> queue, int index) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await ref.read(nowPlayingProvider.notifier).playSong(song);
+      await ref.read(nowPlayingProvider.notifier).playFromQueue(queue, index);
     } catch (e) {
       messenger.showSnackBar(
         SnackBar(content: Text('Could not play file: $e')),
@@ -156,11 +156,12 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             ),
           )
         else
-          for (final s in state.results)
+          for (var i = 0; i < state.results.length; i++)
             SongTile(
-              song: s,
-              onTap: () => _open(s),
-              onLongPress: () => SongActionsSheet.show(context, s),
+              song: state.results[i],
+              onTap: () => _open(state.results, i),
+              onLongPress: () =>
+                  SongActionsSheet.show(context, state.results[i]),
             ),
       ],
     );

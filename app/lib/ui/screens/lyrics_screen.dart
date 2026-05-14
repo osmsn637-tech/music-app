@@ -720,12 +720,16 @@ class _LyricLineRow extends StatelessWidget {
   static const _past = Color(0x4DFFFFFF); // 30%
   static const _future = Color(0x8CFFFFFF); // 55%
 
+  // Single shared format across past / active / future lines so a line's
+  // shape doesn't change when it takes its turn — only the per-word
+  // colour sweep in `_KaraokeText` signals activity.
+  static const _baseSize = 38.0;
+  static const _baseWeight = FontWeight.w800;
+
   @override
   Widget build(BuildContext context) {
     final fallbackColor =
         isPast ? _past : (isActive ? _bright : _future);
-    final baseSize = isActive ? 34.0 : 30.0;
-    final fallbackWeight = isActive ? FontWeight.w900 : FontWeight.w800;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 14),
@@ -742,35 +746,24 @@ class _LyricLineRow extends StatelessWidget {
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(18),
           ),
-          child: AnimatedScale(
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic,
-            alignment: Alignment.centerLeft,
-            // Active stays at natural width (1.0) so a long lyric never
-            // overflows the right edge; the "bigger" feel comes from the
-            // inactive lines shrinking around it.
-            scale: isActive ? 1.0 : 0.92,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-              child: AnimatedDefaultTextStyle(
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOutCubic,
-                style: TextStyle(
-                  color: fallbackColor,
-                  fontSize: baseSize,
-                  fontWeight: fallbackWeight,
-                  letterSpacing: -0.9,
-                  height: 1.12,
-                ),
-                child: isActive
-                    ? _KaraokeText(
-                        text: text.isEmpty ? '♪' : text,
-                        posNotifier: posNotifier,
-                        start: start,
-                        end: end,
-                      )
-                    : Text(text.isEmpty ? '♪' : text),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            child: DefaultTextStyle(
+              style: TextStyle(
+                color: fallbackColor,
+                fontSize: _baseSize,
+                fontWeight: _baseWeight,
+                letterSpacing: -0.9,
+                height: 1.12,
               ),
+              child: isActive
+                  ? _KaraokeText(
+                      text: text.isEmpty ? '♪' : text,
+                      posNotifier: posNotifier,
+                      start: start,
+                      end: end,
+                    )
+                  : Text(text.isEmpty ? '♪' : text),
             ),
           ),
         ),

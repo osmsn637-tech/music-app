@@ -37,13 +37,20 @@ class BloomBackground extends ConsumerStatefulWidget {
 }
 
 class _BloomBackgroundState extends ConsumerState<BloomBackground>
-    with TickerProviderStateMixin {
-  late final List<AnimationController> _drifts;
+    with SingleTickerProviderStateMixin {
+  // Single ValueNotifier driving the painter. Replaces 3 AnimationControllers
+  // + a separate beat ValueNotifier — those each fired a Listener at 60fps,
+  // so the painter repainted every frame even though the drifts have
+  // periods of 19/23/31 seconds. Now one ticker, throttled to ~30fps.
+  final ValueNotifier<_BloomParams> _params =
+      ValueNotifier<_BloomParams>(_BloomParams.zero);
+  late final Ticker _ticker;
+  Duration _lastTickAt = Duration.zero;
 
-  // Per-frame beat envelope (0..1). Animated via a Ticker so it stays
-  // smooth between just_audio's ~1Hz position emissions.
-  final ValueNotifier<double> _beat = ValueNotifier(0.0);
-  late final Ticker _beatTicker;
+  // Drift periods in seconds — kept as constants so the per-frame math
+  // stays branch-free.
+  static const _periods = <double>[19, 23, 31];
+  static const _frameInterval = Duration(milliseconds: 33);
 
   // Snapshot of the last known stream position + wallclock — same trick
   // the karaoke lyrics use to interpolate between coarse position events.
@@ -54,50 +61,47 @@ class _BloomBackgroundState extends ConsumerState<BloomBackground>
   @override
   void initState() {
     super.initState();
-    _drifts = [19, 23, 31].map((secs) {
-      return AnimationController(
-        vsync: this,
-        duration: Duration(seconds: secs),
-      )
-        ..forward(from: secs / 60.0)
-        ..repeat();
-    }).toList();
-    _beatTicker = createTicker(_onTick)..start();
+    _ticker = createTicker(_onTick)..start();
   }
 
   @override
   void dispose() {
-    _beatTicker.dispose();
-    _beat.dispose();
-    for (final c in _drifts) {
-      c.dispose();
-    }
+    _ticker.dispose();
+    _params.dispose();
     super.dispose();
   }
 
-  void _onTick(Duration _) {
-    if (!_isPlaying) {
+  void _onTick(Duration elapsed) {
+    if (elapsed - _lastTickAt < _frameInterval) return;
+    _lastTickAt = elapsed;
+
+    final t = elapsed.inMicroseconds / 1e6;
+    final drifts = <double>[
+      (t / _periods[0]) % 1.0,
+      (t / _periods[1]) % 1.0,
+      (t / _periods[2]) % 1.0,
+    ];
+
+    double beat = _params.value.beat;
+    if (_isPlaying) {
+      final pos = _streamPos + DateTime.now().difference(_streamPosAt);
+      final bpm = (widget.song.bpm ?? 100).clamp(40, 240);
+      final beatSec = 60.0 / bpm;
+      final tSec = pos.inMicroseconds / 1e6;
+      if (tSec >= 0) {
+        // 2-beat cycle, smooth cosine envelope. Peaks (+1) on each
+        // downbeat, troughs (-1) between them — a tide that ebbs and
+        // flows rather than a percussive snap.
+        final phase = (tSec / (beatSec * 2)) % 1.0;
+        beat = math.cos(phase * 2 * math.pi);
+      }
+    } else if (beat.abs() > 0.005) {
       // Drain the flow toward zero when paused so the blobs settle into
       // a calm state rather than freezing mid-swell.
-      if (_beat.value.abs() > 0.005) {
-        _beat.value = _beat.value * 0.96;
-      }
-      return;
+      beat = beat * 0.96;
     }
-    final pos = _streamPos + DateTime.now().difference(_streamPosAt);
-    final bpm = (widget.song.bpm ?? 100).clamp(40, 240);
-    final beatSec = 60.0 / bpm;
-    final tSec = pos.inMicroseconds / 1e6;
-    if (tSec < 0) return;
-    // 2-beat cycle, smooth cosine envelope. Peaks (+1) on each downbeat,
-    // troughs (-1) between them — a tide that ebbs and flows rather than
-    // a percussive snap. Painter maps this -1..1 to subtle radius/alpha
-    // modulation so the motion reads as fluid rather than throbbing.
-    final phase = (tSec / (beatSec * 2)) % 1.0;
-    final env = math.cos(phase * 2 * math.pi);
-    if ((env - _beat.value).abs() > 0.003) {
-      _beat.value = env;
-    }
+
+    _params.value = _BloomParams(drifts: drifts, beat: beat);
   }
 
   @override
@@ -146,14 +150,14 @@ class _BloomBackgroundState extends ConsumerState<BloomBackground>
           // screen mode but without the per-frame compositing cost.
           Positioned.fill(
             child: RepaintBoundary(
-              child: AnimatedBuilder(
-                animation: Listenable.merge([..._drifts, _beat]),
-                builder: (context, _) {
+              child: ValueListenableBuilder<_BloomParams>(
+                valueListenable: _params,
+                builder: (context, params, _) {
                   return CustomPaint(
                     painter: _ColorBlobsPainter(
                       colors: colors,
-                      drifts: _drifts.map((c) => c.value).toList(),
-                      beat: _beat.value,
+                      drifts: params.drifts,
+                      beat: params.beat,
                     ),
                   );
                 },
@@ -204,6 +208,19 @@ class _PlayerStateBridge extends ConsumerWidget {
     onPlayingChange(playing);
     return const SizedBox.shrink();
   }
+}
+
+/// Snapshot of every per-frame value the bloob painter needs. Held in a
+/// single `ValueNotifier` so one tick produces one repaint, regardless of
+/// how many sub-values changed.
+class _BloomParams {
+  const _BloomParams({required this.drifts, required this.beat});
+
+  static const _BloomParams zero =
+      _BloomParams(drifts: <double>[0, 0, 0], beat: 0);
+
+  final List<double> drifts;
+  final double beat;
 }
 
 class _ColorBlobsPainter extends CustomPainter {

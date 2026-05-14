@@ -17,11 +17,12 @@ class PlaylistDetailScreen extends ConsumerWidget {
   Future<void> _openSong(
     BuildContext context,
     WidgetRef ref,
-    SongRow song,
+    List<SongRow> queue,
+    int index,
   ) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await ref.read(nowPlayingProvider.notifier).playSong(song);
+      await ref.read(nowPlayingProvider.notifier).playFromQueue(queue, index);
     } catch (e) {
       messenger.showSnackBar(
         SnackBar(content: Text('Could not play file: $e')),
@@ -156,7 +157,7 @@ class PlaylistDetailScreen extends ConsumerWidget {
                 },
                 child: SongTile(
                   song: song,
-                  onTap: () => _openSong(context, ref, song),
+                  onTap: () => _openSong(context, ref, list, i),
                   trailing: ReorderableDragStartListener(
                     index: i,
                     child: const Padding(
