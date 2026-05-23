@@ -215,14 +215,38 @@ class SyncService {
       final row = await repo.findById(remote.id);
       if (row == null) continue;
 
-      final artworkMissing = remote.artworkUrl != null &&
-          !await _localFileOk(row.localArtworkPath);
-      final lyricsMissing = remote.lyricsUrl != null &&
-          !await _localLyricsOk(row.localLyricsPath);
       // Metadata drift: server-side repair (title / artist / album cleanup)
       // means the manifest may now disagree with the row in the local DB.
       // Refresh those fields without re-downloading the audio.
       final metadataChanged = _metadataDiffers(row, remote);
+
+      // Lyrics drift: the local file may still exist with valid
+      // timestamps but be a stale 1-line whisper transcription that the
+      // server has since replaced with a 60-line vocal-isolated version.
+      // The manifest's `lyricsSize` is the authoritative signal —
+      // bytes-different means the server has a newer file at the same URL.
+      final lyricsSizeDiffers =
+          await _serverSizeDiffers(remote.lyricsSize, row.localLyricsPath);
+      final lyricsMissing = remote.lyricsUrl != null &&
+          (!await _localLyricsOk(row.localLyricsPath) || lyricsSizeDiffers);
+
+      // Artwork drift signals, in order of cheapness to check:
+      //   1. file missing,
+      //   2. remote URL basename differs (extension changed .jpg→.png),
+      //   3. metadata changed (album rename usually coincides with a swap),
+      //   4. server file size differs from local size — catches the
+      //      "manually swapped cover bytes, same filename" case that the
+      //      first 3 signals miss entirely.
+      final artworkBasenameDiffers = remote.artworkUrl != null &&
+          row.localArtworkPath != null &&
+          p.basename(remote.artworkUrl!) != p.basename(row.localArtworkPath!);
+      final artworkSizeDiffers =
+          await _serverSizeDiffers(remote.artworkSize, row.localArtworkPath);
+      final artworkMissing = remote.artworkUrl != null &&
+          (!await _localFileOk(row.localArtworkPath) ||
+              artworkBasenameDiffers ||
+              artworkSizeDiffers ||
+              metadataChanged);
       if (!artworkMissing && !lyricsMissing && !metadataChanged) continue;
 
       onMessage('Repairing ${remote.title}…');
@@ -305,6 +329,23 @@ class SyncService {
         row.durationMs != remote.durationMs ||
         row.fileName != remote.fileName ||
         row.searchText != remote.searchText;
+  }
+
+  /// True if the manifest's [serverSize] is known and disagrees with the
+  /// local file's actual size — the bytes-changed-but-same-URL signal.
+  /// Returns false when the server omitted the size (older manifests) or
+  /// when the local file simply doesn't exist (the missing-file check
+  /// already covers that case elsewhere).
+  Future<bool> _serverSizeDiffers(int? serverSize, String? localPath) async {
+    if (serverSize == null) return false;
+    if (localPath == null || localPath.isEmpty) return false;
+    final f = File(localPath);
+    if (!await f.exists()) return false;
+    try {
+      return (await f.length()) != serverSize;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// True if [path] points to a non-empty file that exists. Null / missing

@@ -12,7 +12,6 @@ class SettingsService {
   static const _kThemeMode = 'theme_mode';
   static const _kDjVoice = 'dj_voice_enabled';
   static const _kDefaultDjMode = 'default_dj_mode';
-  static const _kLiveWallpaper = 'live_wallpaper_enabled';
 
   // --- server URL --------------------------------------------------------
 
@@ -70,16 +69,5 @@ class SettingsService {
 
   Future<void> setDefaultDjMode(DjMode mode) async {
     await _prefs.setString(_kDefaultDjMode, mode.id);
-  }
-
-  // --- live wallpaper ----------------------------------------------------
-
-  /// Whether the home shell uses the multi-blob interactive background
-  /// (touch-reactive, breathing) instead of the minimal two-blob stage.
-  /// Default: on — it's the design's signature.
-  bool get liveWallpaperEnabled => _prefs.getBool(_kLiveWallpaper) ?? true;
-
-  Future<void> setLiveWallpaperEnabled(bool value) async {
-    await _prefs.setBool(_kLiveWallpaper, value);
   }
 }

@@ -8,7 +8,11 @@ plugins {
 android {
     namespace = "com.osman.musicapp.music_app"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // Pinned to a known-good install. flutter.ndkVersion was resolving to
+    // 27.0.12077973 which exists as an empty folder on this machine and
+    // breaks soloud's native CMake build with [CXX1101] "did not have a
+    // source.properties file". 28.2.13676358 is the healthy install.
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

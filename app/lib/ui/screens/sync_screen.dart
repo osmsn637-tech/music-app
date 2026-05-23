@@ -122,7 +122,7 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
                             onSubmitted: (_) => _dismissEditor(),
                             decoration: const InputDecoration(
                               labelText: 'Server URL',
-                              hintText: 'http://192.168.1.20:8000',
+                              hintText: 'http://192.101.2.87:8000',
                               border: OutlineInputBorder(),
                             ),
                             keyboardType: TextInputType.url,

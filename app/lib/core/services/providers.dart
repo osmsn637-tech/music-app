@@ -92,28 +92,3 @@ final defaultDjModeProvider =
     StateNotifierProvider<DefaultDjModeController, DjMode>((ref) {
   return DefaultDjModeController(ref);
 });
-
-/// Toggle for the interactive multi-blob background. Off falls back to the
-/// minimal two-blob stage so the glass surfaces read more clearly.
-class LiveWallpaperController extends StateNotifier<bool> {
-  LiveWallpaperController(this._ref) : super(true) {
-    _hydrate();
-  }
-  final Ref _ref;
-
-  Future<void> _hydrate() async {
-    final settings = await _ref.read(settingsServiceProvider.future);
-    state = settings.liveWallpaperEnabled;
-  }
-
-  Future<void> set(bool value) async {
-    state = value;
-    final settings = await _ref.read(settingsServiceProvider.future);
-    await settings.setLiveWallpaperEnabled(value);
-  }
-}
-
-final liveWallpaperProvider =
-    StateNotifierProvider<LiveWallpaperController, bool>((ref) {
-  return LiveWallpaperController(ref);
-});

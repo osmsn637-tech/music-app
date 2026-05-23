@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/utils/album_colors.dart';
 import '../../data/database/app_database.dart';
 import '../../features/library/album_colors_provider.dart';
 import '../../features/library/home_providers.dart';
@@ -11,8 +12,10 @@ import '../../features/player/providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/album_art.dart';
 import '../widgets/glass.dart';
-import '../widgets/mini_player.dart' show openPlayerRoute;
+import '../widgets/playlist_cover.dart';
+import '../../features/player/player_expansion_controller.dart';
 import 'home_shell_providers.dart';
+import 'playlist_detail_screen.dart';
 
 /// Lumen home — iOS 26 redesign.
 ///
@@ -51,7 +54,7 @@ class HomeScreen extends ConsumerWidget {
       return;
     }
     if (!context.mounted) return;
-    Navigator.of(context).push(openPlayerRoute());
+    PlayerExpansionScope.read(context).expand();
   }
 
   Future<void> _createPlaylist(BuildContext context, WidgetRef ref) async {
@@ -432,11 +435,11 @@ class _SongRow extends ConsumerWidget {
           .watch(albumColorsProvider(song.localArtworkPath))
           .valueOrNull;
       if (colors != null && colors.isNotEmpty) {
-        final hsl = HSLColor.fromColor(colors.first);
-        tint = hsl
-            .withSaturation(hsl.saturation.clamp(0.55, 0.95))
-            .withLightness(hsl.lightness.clamp(0.58, 0.74))
-            .toColor();
+        // Greyscale covers come through as a neutral palette — clamping
+        // a true grey to 0.55+ saturation would resurface hue=0 (red),
+        // so route through the shared accent helper which short-circuits
+        // on neutrals.
+        tint = AlbumColors.accentFromPalette(colors, fallback: tint);
       }
     }
 
@@ -637,35 +640,44 @@ class _PlaylistsRail extends StatelessWidget {
                 padding: const EdgeInsets.only(right: 12),
                 child: SizedBox(
                   width: 150,
-                  child: Glass(
-                    borderRadius: LumenTokens.rLg,
-                    padding: const EdgeInsets.all(10),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        AlbumArt(
-                          seed: 'pl_${p.id}',
-                          size: 130,
-                          radius: LumenTokens.rXs,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          p.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(LumenTokens.rLg),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            PlaylistDetailScreen(playlistId: p.id),
+                      ),
+                    ),
+                    child: Glass(
+                      borderRadius: LumenTokens.rLg,
+                      padding: const EdgeInsets.all(10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          PlaylistCover(
+                            playlistId: p.id,
+                            size: 130,
+                            radius: LumenTokens.rXs,
                           ),
-                        ),
-                        Text(
-                          'Playlist',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: LumenTokens.fgDimOf(context),
+                          const SizedBox(height: 8),
+                          Text(
+                            p.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
-                        ),
-                      ],
+                          Text(
+                            'Playlist',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: LumenTokens.fgDimOf(context),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -802,12 +814,18 @@ class _GlassListContent extends StatelessWidget {
     return Glass(
       borderRadius: LumenTokens.rLg,
       padding: const EdgeInsets.all(6),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (var i = 0; i < songs.length; i++)
-            _glassRow(context, songs, i),
-        ],
+      // ClipRect absorbs the ~2 px of rounding-error overflow when the
+      // glass card's fixed page height divides into N rows that don't
+      // sum to exactly the available space. Better than tuning the row
+      // padding because the row count changes between pages.
+      child: ClipRect(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var i = 0; i < songs.length; i++)
+              _glassRow(context, songs, i),
+          ],
+        ),
       ),
     );
   }

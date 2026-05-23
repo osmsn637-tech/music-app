@@ -16,9 +16,11 @@ class TabSpec {
   final bool accent; // Flacko (AI DJ) uses pink
 }
 
-/// Compact floating glass pill that sits 16px above the safe-area bottom.
-/// Each tab is a small icon + 9.5px label; the active tab gets a soft
-/// 10% white wash (or pink for the Flacko/accent tab).
+/// Sticky bottom tab bar. Spans the full width and runs flush to the
+/// screen edge; top corners are rounded so the bar reads as a discrete
+/// surface rather than an unbroken strip. The bottom safe-area inset is
+/// absorbed inside the bar so its glass fill extends behind the home
+/// indicator on iOS.
 class GlassTabBar extends StatelessWidget {
   const GlassTabBar({
     super.key,
@@ -33,24 +35,24 @@ class GlassTabBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
-      child: Glass(
-        strong: true,
-        borderRadius: LumenTokens.rPill,
-        padding: const EdgeInsets.all(6),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: List.generate(tabs.length, (i) {
-            return Expanded(
-              child: _TabItem(
-                spec: tabs[i],
-                active: i == activeIndex,
-                onTap: () => onChanged(i),
-              ),
-            );
-          }),
-        ),
+    final bottomInset = MediaQuery.of(context).padding.bottom;
+    return Glass(
+      strong: true,
+      shape: const BorderRadius.vertical(
+        top: Radius.circular(LumenTokens.rXl),
+      ),
+      padding: EdgeInsets.fromLTRB(6, 6, 6, 6 + bottomInset),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: List.generate(tabs.length, (i) {
+          return Expanded(
+            child: _TabItem(
+              spec: tabs[i],
+              active: i == activeIndex,
+              onTap: () => onChanged(i),
+            ),
+          );
+        }),
       ),
     );
   }

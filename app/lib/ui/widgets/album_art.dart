@@ -22,9 +22,29 @@ class AlbumArt extends StatelessWidget {
   final double size;
   final double radius;
 
+  // Process-wide cache of which artwork paths are present on disk. The
+  // previous build called `File(path).existsSync()` inside `build()`,
+  // which is a sync filesystem syscall on every rebuild — and `AlbumArt`
+  // sits inside `Positioned.fromRect` in the player, where the parent
+  // rebuilds on every animation tick (~60 Hz during expand/collapse).
+  // Result was a syscall per frame for an unchanging file. We cache the
+  // result the first time we see a path; if the file is later swapped
+  // out (rare for artwork) the cached entry will be wrong until restart,
+  // which is fine — the wrong branch just renders the gradient fallback
+  // for one song.
+  static final Map<String, bool> _existsCache = <String, bool>{};
+
+  static bool _exists(String path) {
+    final cached = _existsCache[path];
+    if (cached != null) return cached;
+    final result = File(path).existsSync();
+    _existsCache[path] = result;
+    return result;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final useFile = artworkPath != null && File(artworkPath!).existsSync();
+    final useFile = artworkPath != null && _exists(artworkPath!);
     return SizedBox(
       width: size,
       height: size,

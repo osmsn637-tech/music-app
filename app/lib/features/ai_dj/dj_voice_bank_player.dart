@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle, AssetManifest;
-import 'package:just_audio/just_audio.dart';
+import 'package:flutter_soloud/flutter_soloud.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -161,16 +161,14 @@ class DjVoiceBankStore {
   }
 }
 
+/// Plays the bundled DJ voice clips through the shared SoLoud engine.
+/// Talks via the same mixer the music decks use, so the music ducking
+/// applies via [PlayerService.duckOutgoing] (driven by [isSpeakingStream]).
 class DjVoiceBankPlayer {
-  DjVoiceBankPlayer({AudioPlayer? player}) : _player = player ?? AudioPlayer();
+  DjVoiceBankPlayer({SoLoud? soloud}) : _soloud = soloud ?? SoLoud.instance;
 
-  final AudioPlayer _player;
+  final SoLoud _soloud;
   final _speakingCtrl = StreamController<bool>.broadcast();
-
-  /// Playback rate for pre-rendered F5-TTS voice clips. The model bakes
-  /// at a deliberately slow cadence; 1.15x trims the drag without making
-  /// the host sound chipmunky. Bump to ~1.25 if you want it punchier.
-  static const double _playbackSpeed = 1.15;
 
   Stream<bool> get isSpeakingStream => _speakingCtrl.stream;
 
@@ -186,26 +184,49 @@ class DjVoiceBankPlayer {
       return false;
     }
 
+    AudioSource? source;
+    SoundHandle? handle;
+    final done = Completer<void>();
+    StreamSubscription<void>? sub;
     try {
       _speakingCtrl.add(true);
-      await _player.stop();
-      await _player.setFilePath(path);
-      await _player.setSpeed(_playbackSpeed);
-      await _player.play();
-      await _player.processingStateStream.firstWhere(
-        (state) => state == ProcessingState.completed,
-      );
+      source = await _soloud.loadFile(path);
+      // The pre-rendered F5-TTS clips are deliberately slow; nudge speed
+      // so the host doesn't drag (same constant as the previous impl).
+      handle = await _soloud.play(source, volume: 1.0);
+      try {
+        _soloud.setRelativePlaySpeed(handle, 1.15);
+      } catch (_) {
+        // setRelativePlaySpeed isn't critical — falling back to 1.0 is
+        // fine if the platform variant doesn't support it.
+      }
+
+      sub = source.allInstancesFinished.listen((_) {
+        if (!done.isCompleted) done.complete();
+      });
+
+      await done.future;
       return true;
     } catch (e, st) {
       debugPrint('[dj-bank] failed to play ${clip.id}: $e\n$st');
       return false;
     } finally {
+      await sub?.cancel();
+      if (handle != null) {
+        try {
+          _soloud.stop(handle);
+        } catch (_) {}
+      }
+      if (source != null) {
+        try {
+          await _soloud.disposeSource(source);
+        } catch (_) {}
+      }
       _speakingCtrl.add(false);
     }
   }
 
   Future<void> dispose() async {
-    await _player.dispose();
     await _speakingCtrl.close();
   }
 }

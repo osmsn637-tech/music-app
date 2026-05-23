@@ -921,6 +921,38 @@ def _lrclib_search_synced(
     return None
 
 
+_LRC_TS_RE = re.compile(r"\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]")
+
+
+def _lrc_last_timestamp_s(synced: str) -> Optional[float]:
+    """Return the largest timestamp in an LRC blob, in seconds, or None
+    when the blob has no timestamps."""
+    last_ms = 0
+    found = False
+    for m in _LRC_TS_RE.finditer(synced):
+        ms = int(m.group(1)) * 60_000 + int(m.group(2)) * 1000
+        if m.group(3):
+            frac = m.group(3).ljust(3, "0")[:3]
+            ms += int(frac)
+        if ms > last_ms:
+            last_ms = ms
+            found = True
+    return last_ms / 1000 if found else None
+
+
+def _duration_fits(synced: str, duration_s: Optional[int], slack_s: float = 10.0) -> bool:
+    """Reject lyrics whose last timestamp overshoots the song by more
+    than [slack_s] seconds — that's the fingerprint of LRCLib serving
+    the music-video / extended cut for a short edit. When duration is
+    unknown we have to accept the result on faith."""
+    if not duration_s:
+        return True
+    last = _lrc_last_timestamp_s(synced)
+    if last is None:
+        return True
+    return last <= duration_s + slack_s
+
+
 def fetch_synced_lyrics(
     artist: str,
     title: str,
@@ -932,7 +964,13 @@ def fetch_synced_lyrics(
     with fuzzy + uncensored-preferring ranking. If `/api/get` returns a
     heavily-censored upload, we ALSO query `/api/search` and keep whichever
     of the two is least censored — LRCLib's exact-match endpoint sometimes
-    returns the bowdlerized version when the database has both."""
+    returns the bowdlerized version when the database has both.
+
+    Every candidate is duration-validated against [duration_s] before
+    being returned — LRCLib's `/api/search` ignores duration entirely
+    and happily hands back the music-video cut when the user only has
+    the radio edit, which paints the karaoke view 30s+ off.
+    """
     if not artist or not title:
         return None
 
@@ -947,7 +985,7 @@ def fetch_synced_lyrics(
     get_hit: Optional[str] = None
     for params in _lyric_query_variants(artist, title, album, duration_s):
         synced = _lrclib_get_synced(params, session)
-        if synced:
+        if synced and _duration_fits(synced, duration_s):
             get_hit = synced
             break
 
@@ -959,6 +997,8 @@ def fetch_synced_lyrics(
     # Either /api/get found nothing, or what it found is heavily censored.
     # Try /api/search and pick whichever option is least censored.
     search_hit = _lrclib_search_synced(primary_artist, clean_title, session)
+    if search_hit is not None and not _duration_fits(search_hit, duration_s):
+        search_hit = None
 
     candidates = [c for c in (get_hit, search_hit) if c]
     if not candidates:
@@ -1257,10 +1297,18 @@ def regenerate_manifest(base_url: Optional[str]) -> None:
         lrc = LYRICS_DIR / f"{stem}.lrc"
         if lrc.exists():
             entry["lyricsUrl"] = f"{base}/lyrics/{lrc.name}"
+            # Size fingerprint lets the app detect "server replaced this
+            # file but kept the same URL" — without it, the sync repair
+            # can't distinguish a stale 1-line whisper file from a fresh
+            # 60-line vocal-isolated transcription.
+            entry["lyricsSize"] = lrc.stat().st_size
         for art_ext in SUPPORTED_ART_EXTS:
             art = ARTWORK_DIR / f"{stem}{art_ext}"
             if art.exists():
                 entry["artworkUrl"] = f"{base}/artwork/{art.name}"
+                # Same fingerprint trick for covers — bytes-changed-but-
+                # same-filename is the common case after manual cover swaps.
+                entry["artworkSize"] = art.stat().st_size
                 break
         songs.append(entry)
 
@@ -1302,17 +1350,65 @@ def find_audio_for(song_id: str) -> Optional[Path]:
     return None
 
 
+def _isolate_vocals(audio_path: Path) -> Path:
+    """Run demucs on [audio_path] and return the path to the isolated
+    vocals .wav stem. Caches in /tmp/demucs/. Raises on failure (caller
+    falls back to the raw mp3)."""
+    import subprocess
+    out_root = Path("/tmp/demucs")
+    out_root.mkdir(parents=True, exist_ok=True)
+    # demucs writes to <out>/<model>/<song-stem>/vocals.wav
+    model = "htdemucs"
+    stem_dir = out_root / model / audio_path.stem
+    vocals = stem_dir / "vocals.wav"
+    if vocals.exists():
+        return vocals
+    # `--two-stems vocals` skips drums/bass/other to halve the runtime.
+    # `-d cpu` because the container has no GPU.
+    subprocess.run(
+        ["python", "-m", "demucs",
+         "-n", model, "--two-stems", "vocals", "-d", "cpu",
+         "-o", str(out_root), str(audio_path)],
+        check=True,
+    )
+    if not vocals.exists():
+        raise RuntimeError(f"demucs produced no vocals.wav for {audio_path.name}")
+    return vocals
+
+
 def transcribe_to_lrc(audio_path: Path, model_name: str = "small") -> str:
     """Returns LRC-formatted lyrics from a Whisper transcription of
     [audio_path]. Used for songs LRCLib doesn't have (instrumentals,
-    leaks, unreleased, very recent drops)."""
+    leaks, unreleased, very recent drops).
+
+    First isolates the vocal stem with demucs so the 808s + ad-libs +
+    instrumental don't confuse Whisper's speech-trained acoustic model.
+    On rap this is the difference between near-unusable output and
+    something close to actually-readable lyrics. Falls back to the raw
+    mp3 if demucs fails.
+    """
+    try:
+        source = _isolate_vocals(audio_path)
+        print(f"      vocals isolated → {source.name}", flush=True)
+        # No VAD on the stem — silence outside vocals is already gone
+        # after stem separation, so VAD just risks dropping quiet adlibs.
+        vad_filter = False
+    except Exception as e:
+        print(
+            f"      demucs failed ({type(e).__name__}: {e}); "
+            f"falling back to raw mp3",
+            flush=True,
+        )
+        source = audio_path
+        vad_filter = True
+
     from faster_whisper import WhisperModel
     model = WhisperModel(model_name, device="cpu", compute_type="int8")
     segments, _info = model.transcribe(
-        str(audio_path),
+        str(source),
         language="en",
-        vad_filter=True,
-        vad_parameters={"min_silence_duration_ms": 500},
+        vad_filter=vad_filter,
+        vad_parameters={"min_silence_duration_ms": 500} if vad_filter else None,
         word_timestamps=False,
         condition_on_previous_text=False,
     )
@@ -1323,7 +1419,6 @@ def transcribe_to_lrc(audio_path: Path, model_name: str = "small") -> str:
             continue
         m = int(seg.start) // 60
         s = seg.start - m * 60
-        # LRC timestamp format: [mm:ss.cc]
         lines.append(f"[{m:02d}:{s:05.2f}]{text}")
     return "\n".join(lines) + "\n"
 

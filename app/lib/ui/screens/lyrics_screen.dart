@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -12,8 +13,8 @@ import '../../features/lyrics/lyrics_loader.dart';
 import '../../features/lyrics/providers.dart';
 import '../../features/lyrics/share_lyrics.dart';
 import '../../features/player/now_playing_controller.dart';
+import '../../features/player/player_service.dart';
 import '../../features/player/providers.dart';
-import '../widgets/bloom_background.dart';
 
 /// Apple-Music-style lyrics view.
 ///
@@ -22,11 +23,16 @@ import '../widgets/bloom_background.dart';
 ///    line, each word lights up as the song reaches it (karaoke).
 ///  - The view jumps to the current line on open (no scroll-from-top).
 ///  - Tap any line to seek to that timestamp.
-class LyricsScreen extends ConsumerWidget {
+class LyricsScreen extends ConsumerStatefulWidget {
   const LyricsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<LyricsScreen> createState() => _LyricsScreenState();
+}
+
+class _LyricsScreenState extends ConsumerState<LyricsScreen> {
+  @override
+  Widget build(BuildContext context) {
     final song = ref.watch(nowPlayingProvider);
 
     return Scaffold(
@@ -35,39 +41,50 @@ class LyricsScreen extends ConsumerWidget {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          if (song != null) BloomBackground(song: song, darkenStrength: 1.4),
+          // Plain dark gradient bg — replaces the previous BloomBackground.
+          // The bloom (FFT ticker @ 20 Hz, 3 aurora curtains driven by bass /
+          // snare kicks, ImageFiltered blurred art) was running underneath
+          // the heavy 1.4× lyrics vignette where ~none of its motion was
+          // visible. Static gradient costs zero per-frame work.
+          const Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Color(0xFF0A0A12), Color(0xFF000000)],
+                ),
+              ),
+            ),
+          ),
           SafeArea(
             child: Material(
               type: MaterialType.transparency,
-              child: song == null
-                  ? const _NotPlayingMessage()
-                  : ref.watch(lyricsForSongProvider(song)).when(
-                        loading: () =>
-                            const Center(child: CircularProgressIndicator()),
-                        error: (e, _) =>
-                            Center(child: Text('Error loading lyrics: $e')),
-                        data: (result) {
-                          switch (result.kind) {
-                            case LyricsKind.synced:
-                              return _SyncedLyricsView(
-                                song: song,
-                                lines: result.lines,
-                              );
-                            case LyricsKind.plain:
-                              return _PlainLyricsView(
-                                song: song,
-                                text: result.plainText!,
-                              );
-                            case LyricsKind.none:
-                              return _NoLyricsMessage(song: song);
-                          }
-                        },
-                      ),
+              child: _buildContent(song),
             ),
           ),
         ],
       ),
     );
+  }
+
+  Widget _buildContent(SongRow? song) {
+    if (song == null) return const _NotPlayingMessage();
+    return ref.watch(lyricsForSongProvider(song)).when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => Center(child: Text('Error loading lyrics: $e')),
+          data: (result) {
+            switch (result.kind) {
+              case LyricsKind.synced:
+                return _SyncedLyricsView(song: song, lines: result.lines);
+              case LyricsKind.plain:
+                return _PlainLyricsView(
+                    song: song, text: result.plainText!);
+              case LyricsKind.none:
+                return _NoLyricsMessage(song: song);
+            }
+          },
+        );
   }
 }
 
@@ -158,9 +175,44 @@ class _SyncedLyricsView extends ConsumerStatefulWidget {
 class _SyncedLyricsViewState extends ConsumerState<_SyncedLyricsView>
     with SingleTickerProviderStateMixin {
   final _scroll = ScrollController();
-  final _itemKeys = <GlobalKey>[];
   int _activeIndex = -1;
   bool _initialScrollDone = false;
+
+  // Per-line top offsets inside the content area (i.e. excluding the
+  // ListView's top padding). Computed once when the lines or content
+  // width change, using a TextPainter per line to measure exactly how
+  // tall each row will render. This replaces a fixed-avg estimate
+  // (98 px / line) — when a song's lyrics wrap to 2 rows on average,
+  // the fixed estimate undershoots, so the auto-scroll drifts the
+  // active line lower and lower until it sticks to the bottom of the
+  // viewport. The exact heights keep it at the intended 38 % anchor.
+  List<double> _lineTops = const [];
+  double? _measuredWidth;
+
+  // Style used for each lyric row's text. Must match _LyricLineRow's
+  // base style exactly, otherwise the measured heights diverge from
+  // the rendered ones.
+  static const TextStyle _lineStyle = TextStyle(
+    fontSize: _LyricLineRow._baseSize,
+    fontWeight: _LyricLineRow._baseWeight,
+    letterSpacing: -0.025 * _LyricLineRow._baseSize,
+    height: 1.12,
+  );
+
+  // Per-row padding contributions: inner Padding(symmetric h:8, v:8)
+  // around the styled text + outer Padding(symmetric v:18) around the
+  // GestureDetector. Both come from [_LyricLineRow].
+  static const double _innerHPad = 8;
+  static const double _innerVPad = 8;
+  static const double _outerVPad = 18;
+  static const double _rowPaddingY = (_innerVPad + _outerVPad) * 2;
+
+  // When the user manually scrolls, suspend the auto-scroll for a few
+  // seconds so a swipe sticks. Without this, every lyric-line
+  // transition would yank the list back to the auto-scroll anchor and
+  // override the user's gesture.
+  DateTime _lastUserScrollAt = DateTime.fromMillisecondsSinceEpoch(0);
+  static const Duration _userScrollGrace = Duration(seconds: 4);
 
   // Position interpolation state. just_audio's positionStream only ticks
   // ~1x/sec, which would make per-word highlighting jerky. We snapshot
@@ -176,8 +228,10 @@ class _SyncedLyricsViewState extends ConsumerState<_SyncedLyricsView>
   Duration _streamPos = Duration.zero;
   DateTime _streamPosAt = DateTime.now();
   bool _isPlaying = false;
+  Duration _songDuration = Duration.zero;
   final ValueNotifier<Duration> _posNotifier =
       ValueNotifier<Duration>(Duration.zero);
+  bool _providersSeeded = false;
 
   /// Indices of lyric lines the user has picked for share-as-image.
   /// Empty = no selection mode (taps seek normally). Capped at 4 lines
@@ -192,9 +246,6 @@ class _SyncedLyricsViewState extends ConsumerState<_SyncedLyricsView>
   @override
   void initState() {
     super.initState();
-    _itemKeys
-      ..clear()
-      ..addAll(List.generate(widget.lines.length, (_) => GlobalKey()));
     _ticker = createTicker(_onTick)..start();
   }
 
@@ -223,12 +274,11 @@ class _SyncedLyricsViewState extends ConsumerState<_SyncedLyricsView>
   @override
   void didUpdateWidget(covariant _SyncedLyricsView old) {
     super.didUpdateWidget(old);
-    if (old.lines.length != widget.lines.length) {
-      _itemKeys
-        ..clear()
-        ..addAll(List.generate(widget.lines.length, (_) => GlobalKey()));
+    if (!identical(old.lines, widget.lines) ||
+        old.lines.length != widget.lines.length) {
       _initialScrollDone = false;
       _activeIndex = -1;
+      _invalidateMeasure();
     }
   }
 
@@ -422,34 +472,55 @@ class _SyncedLyricsViewState extends ConsumerState<_SyncedLyricsView>
     }
   }
 
-  /// Estimate the offset of the [index]th line using an assumed line
-  /// height. Used for the initial jump so the GlobalKey for the line is
-  /// likely to have been built by the time we recompute precisely.
-  double _estimateOffset(int index, double viewportHeight) {
-    const avgLineHeight = 98.0;
-    final activeLift = 16.0;
-    final topPad = viewportHeight * 0.25;
-    final lineTop = topPad + index * avgLineHeight + activeLift;
+  /// Lazily measure each lyric line's rendered height at the current
+  /// content width. Cached on `(lines, width)`. The measured tops feed
+  /// [_offsetForLine] so the auto-scroll lands the active line at
+  /// exactly 38 % of viewport height regardless of how many rows each
+  /// line wraps to.
+  void _ensureMeasured(double contentWidth) {
+    if (_measuredWidth == contentWidth &&
+        _lineTops.length == widget.lines.length) {
+      return;
+    }
+    final textWidth = contentWidth - _innerHPad * 2;
+    final tops = <double>[];
+    var cursor = 0.0;
+    for (final line in widget.lines) {
+      tops.add(cursor);
+      final text = line.text.isEmpty ? '♪' : line.text;
+      final tp = TextPainter(
+        text: TextSpan(text: text, style: _lineStyle),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: textWidth);
+      cursor += tp.size.height + _rowPaddingY;
+      tp.dispose();
+    }
+    _lineTops = tops;
+    _measuredWidth = contentWidth;
+  }
+
+  /// Scroll offset that places the [index]th line at ~38 % of the
+  /// viewport. Uses the precomputed per-line heights — exact, no
+  /// drift across long songs / wrapped lines.
+  double _offsetForLine(int index, double viewportHeight) {
+    if (index < 0 || index >= _lineTops.length) return 0;
+    final topPad = viewportHeight * 0.26;
+    final lineTop = topPad + _lineTops[index];
     return (lineTop - viewportHeight * 0.38).clamp(0.0, double.infinity);
   }
 
-  /// Precisely scroll the [index]th line to ~38% of viewport height.
-  /// Returns true if the line had been built and the scroll was applied.
+  /// Scroll the [index]th line into view at ~38 % of viewport height.
+  /// Skipped while the user has scrolled manually within the last few
+  /// seconds — auto-scroll should never fight a deliberate swipe.
   bool _scrollToActive(int index, {required bool animate}) {
     if (!_scroll.hasClients) return false;
-    if (index < 0 || index >= _itemKeys.length) return false;
-    final keyCtx = _itemKeys[index].currentContext;
-    if (keyCtx == null) return false;
-    final box = keyCtx.findRenderObject() as RenderBox?;
-    if (box == null) return false;
-    final scrollViewBox = _scroll.position.context.notificationContext
-        ?.findRenderObject() as RenderBox?;
-    if (scrollViewBox == null) return false;
-    final offsetWithinViewport =
-        box.localToGlobal(Offset.zero, ancestor: scrollViewBox).dy;
+    if (index < 0 || index >= widget.lines.length) return false;
+    if (animate &&
+        DateTime.now().difference(_lastUserScrollAt) < _userScrollGrace) {
+      return false;
+    }
     final viewportHeight = _scroll.position.viewportDimension;
-    final delta = offsetWithinViewport - viewportHeight * 0.38;
-    final target = (_scroll.offset + delta).clamp(
+    final target = _offsetForLine(index, viewportHeight).clamp(
       _scroll.position.minScrollExtent,
       _scroll.position.maxScrollExtent,
     );
@@ -465,23 +536,36 @@ class _SyncedLyricsViewState extends ConsumerState<_SyncedLyricsView>
     return true;
   }
 
-  /// Two-pass jump used on first build. The first jump uses an estimated
-  /// offset to put the active line near the viewport (which forces the
-  /// ListView.builder to instantiate it), then the second jump fine-tunes
-  /// using its real measured position.
+  /// Jump straight to the active line on first build. Uses the exact
+  /// precomputed offset — no second-pass refinement needed.
   void _initialJumpTo(int index) {
     if (!_scroll.hasClients) return;
     final viewportHeight = _scroll.position.viewportDimension;
-    final estimate = _estimateOffset(index, viewportHeight).clamp(
+    final estimate = _offsetForLine(index, viewportHeight).clamp(
       _scroll.position.minScrollExtent,
       _scroll.position.maxScrollExtent,
     );
     _scroll.jumpTo(estimate);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _scrollToActive(index, animate: false);
-      _initialScrollDone = true;
-    });
+    _initialScrollDone = true;
+  }
+
+  /// Drop the measured heights when the lyric list changes, so the
+  /// next build re-measures against the new lines.
+  void _invalidateMeasure() {
+    _lineTops = const [];
+    _measuredWidth = null;
+  }
+
+  /// Called from the ListView's NotificationListener when a scroll
+  /// gesture from the user (not our own animateTo) drives the
+  /// position. Marks the user-scroll grace window so the auto-scroll
+  /// stops fighting the swipe.
+  bool _onScrollNotification(ScrollNotification n) {
+    if (n is UserScrollNotification &&
+        n.direction != ScrollDirection.idle) {
+      _lastUserScrollAt = DateTime.now();
+    }
+    return false;
   }
 
   /// Time at which the active line ends — i.e. when the next line starts,
@@ -496,26 +580,43 @@ class _SyncedLyricsViewState extends ConsumerState<_SyncedLyricsView>
 
   @override
   Widget build(BuildContext context) {
-    // Build runs only when stream pos / play state / duration changes (a
-    // few times per second from just_audio) or when _activeIndex moves.
-    // Per-frame karaoke updates flow through _posNotifier and never
-    // rebuild the list.
-    final streamPos =
-        ref.watch(playerPositionProvider).valueOrNull ?? Duration.zero;
-    final playerState = ref.watch(playerStateStreamProvider).valueOrNull;
-    final isPlaying = playerState?.playing ?? false;
-    final songDuration =
-        ref.watch(playerDurationProvider).valueOrNull ?? Duration.zero;
-
-    if (streamPos != _streamPos) {
-      _streamPos = streamPos;
+    // Side-effect-only listeners on the player streams. Using
+    // `ref.listen` instead of `ref.watch` keeps the position emission
+    // (~16 Hz) from rebuilding the entire ListView every frame — the
+    // ticker handles per-frame interpolation, this is just keeping the
+    // snapshot baseline fresh. Build now only runs when _activeIndex
+    // or share-state changes, which is what makes the page 60 fps.
+    ref.listen<AsyncValue<Duration>>(playerPositionProvider, (_, next) {
+      final pos = next.valueOrNull;
+      if (pos == null || pos == _streamPos) return;
+      _streamPos = pos;
       _streamPosAt = DateTime.now();
-      // Snap notifier if we drifted far (e.g., user just seeked).
-      if ((_posNotifier.value - streamPos).inMilliseconds.abs() > 250) {
-        _posNotifier.value = streamPos;
+      if ((_posNotifier.value - pos).inMilliseconds.abs() > 250) {
+        _posNotifier.value = pos;
       }
+    });
+    ref.listen<AsyncValue<PlayerSnapshot>>(playerStateStreamProvider,
+        (_, next) {
+      _isPlaying = next.valueOrNull?.playing ?? false;
+    });
+    ref.listen<AsyncValue<Duration?>>(playerDurationProvider, (_, next) {
+      _songDuration = next.valueOrNull ?? _songDuration;
+    });
+
+    // Seed once from a synchronous read so the first frame has values.
+    // `ref.listen` only fires on subsequent emissions.
+    if (!_providersSeeded) {
+      _providersSeeded = true;
+      _streamPos =
+          ref.read(playerPositionProvider).valueOrNull ?? Duration.zero;
+      _streamPosAt = DateTime.now();
+      _posNotifier.value = _streamPos;
+      _isPlaying =
+          ref.read(playerStateStreamProvider).valueOrNull?.playing ?? false;
+      _songDuration =
+          ref.read(playerDurationProvider).valueOrNull ?? Duration.zero;
     }
-    _isPlaying = isPlaying;
+    final songDuration = _songDuration;
 
     if (!_initialScrollDone && _activeIndex >= 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -524,8 +625,13 @@ class _SyncedLyricsViewState extends ConsumerState<_SyncedLyricsView>
       });
     }
 
-    final viewportHeight = MediaQuery.of(context).size.height;
+    final mqSize = MediaQuery.sizeOf(context);
+    final viewportHeight = mqSize.height;
     final lines = widget.lines;
+
+    // Measure once per (lines, content-width). Content width matches the
+    // ListView's horizontal padding: 18 left + 50 right.
+    _ensureMeasured(mqSize.width - 18 - 50);
 
     return Stack(
       children: [
@@ -533,39 +639,44 @@ class _SyncedLyricsViewState extends ConsumerState<_SyncedLyricsView>
           children: [
             _Header(song: widget.song),
             Expanded(
-              child: ListView.builder(
-                controller: _scroll,
-                // Asymmetric horizontal padding — left edge sits closer
-                // to the screen edge so the active line's 1.18x scale
-                // doesn't push the right edge into the gutter.
-                padding: EdgeInsets.fromLTRB(
-                  18, viewportHeight * 0.26, 30, viewportHeight * 0.32,
-                ),
-                itemCount: lines.length,
-                itemBuilder: (context, i) {
+              child: NotificationListener<ScrollNotification>(
+                onNotification: _onScrollNotification,
+                child: ListView.builder(
+                  controller: _scroll,
+                  // Asymmetric horizontal padding — left edge sits close
+                  // to the screen edge so the active line's `_activeScale`
+                  // (~1.22) can grow rightward without bleeding into the
+                  // gutter. Right padding is generous for the same reason.
+                  padding: EdgeInsets.fromLTRB(
+                    18, viewportHeight * 0.26, 50, viewportHeight * 0.32,
+                  ),
+                  itemCount: lines.length,
+                  itemBuilder: (context, i) {
                   final line = lines[i];
                   final isActive = i == _activeIndex;
                   final isPast = i < _activeIndex;
                   final isSelected = _selected.contains(i);
                   final lineEnd =
                       isActive ? _lineEnd(i, songDuration) : Duration.zero;
-                  return RepaintBoundary(
-                    child: KeyedSubtree(
-                      key: _itemKeys[i],
-                      child: _LyricLineRow(
-                        text: line.text,
-                        isActive: isActive,
-                        isPast: isPast,
-                        isSelected: isSelected,
-                        posNotifier: _posNotifier,
-                        start: line.time,
-                        end: lineEnd,
-                        onTap: () => _onLineTap(i, line.time),
-                        onLongPress: () => _onLineLongPress(i),
-                      ),
-                    ),
+                  // ListView.builder automatically adds RepaintBoundaries
+                  // around each item (addRepaintBoundaries: true). Wrapping
+                  // again is redundant and adds layer overhead. GlobalKeys
+                  // were dropped too — _scrollToActive uses an offset
+                  // estimate now, which keeps the BuildOwner free of
+                  // hundreds of registered keys.
+                  return _LyricLineRow(
+                    text: line.text,
+                    isActive: isActive,
+                    isPast: isPast,
+                    isSelected: isSelected,
+                    posNotifier: _posNotifier,
+                    start: line.time,
+                    end: lineEnd,
+                    onTap: () => _onLineTap(i, line.time),
+                    onLongPress: () => _onLineLongPress(i),
                   );
                 },
+                ),
               ),
             ),
           ],
@@ -720,53 +831,83 @@ class _LyricLineRow extends StatelessWidget {
   static const _past = Color(0x4DFFFFFF); // 30%
   static const _future = Color(0x8CFFFFFF); // 55%
 
-  // Single shared format across past / active / future lines so a line's
-  // shape doesn't change when it takes its turn — only the per-word
-  // colour sweep in `_KaraokeText` signals activity.
-  static const _baseSize = 38.0;
+  // Every line is laid out at `_baseSize` so the wrap is identical
+  // whether it's active or not — a 1-line lyric stays 1-line when it
+  // takes its turn, a 3-liner stays a 3-liner. The "bigger when
+  // active" effect is a Transform.scale, which paints the same laid-out
+  // text larger without re-flowing it.
+  static const _baseSize = 32.0;
   static const _baseWeight = FontWeight.w800;
+  // Modest scale so the active line clearly grows without pushing its
+  // right edge past the ListView's right padding (set with this scale
+  // in mind).
+  static const _activeScale = 1.22;
 
   @override
   Widget build(BuildContext context) {
     final fallbackColor =
         isPast ? _past : (isActive ? _bright : _future);
 
+    // Per-row widgets are deliberately STATIC (no AnimatedContainer,
+    // AnimatedScale, InkWell). The previous build attached an implicit
+    // animation controller to every visible row via AnimatedContainer
+    // and AnimatedScale; during scroll, each new row instantiated two
+    // controllers and disposed them on exit, plus an InkWell maintained
+    // a Material ripple state. That per-row state churn was the source
+    // of the ~20fps scroll on the lyrics page. Active-line transitions
+    // now snap instead of easing — the trade-off is intentional.
+    final Widget textChild = isActive
+        ? _KaraokeText(
+            text: text.isEmpty ? '♪' : text,
+            posNotifier: posNotifier,
+            start: start,
+            end: end,
+          )
+        : Text(text.isEmpty ? '♪' : text);
+
+    Widget styled = DefaultTextStyle(
+      style: TextStyle(
+        color: fallbackColor,
+        fontSize: _baseSize,
+        fontWeight: _baseWeight,
+        letterSpacing: -0.025 * _baseSize,
+        height: 1.12,
+      ),
+      child: textChild,
+    );
+
+    if (isActive) {
+      styled = Transform.scale(
+        scale: _activeScale,
+        alignment: Alignment.centerLeft,
+        child: styled,
+      );
+    }
+
+    Widget content = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      child: styled,
+    );
+
+    if (isSelected) {
+      content = DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: content,
+      );
+    }
+
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
+      // Vertical padding sized to absorb the scaled-up active line so it
+      // doesn't bleed into neighbouring rows.
+      padding: const EdgeInsets.symmetric(vertical: 18),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: onTap,
         onLongPress: onLongPress,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-          decoration: BoxDecoration(
-            color: isSelected
-                ? Colors.white.withValues(alpha: 0.16)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(18),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            child: DefaultTextStyle(
-              style: TextStyle(
-                color: fallbackColor,
-                fontSize: _baseSize,
-                fontWeight: _baseWeight,
-                letterSpacing: -0.9,
-                height: 1.12,
-              ),
-              child: isActive
-                  ? _KaraokeText(
-                      text: text.isEmpty ? '♪' : text,
-                      posNotifier: posNotifier,
-                      start: start,
-                      end: end,
-                    )
-                  : Text(text.isEmpty ? '♪' : text),
-            ),
-          ),
-        ),
+        child: content,
       ),
     );
   }
@@ -776,85 +917,262 @@ class _LyricLineRow extends StatelessWidget {
 /// as the playhead moves through the line. Word durations are weighted by
 /// character count so short connectives don't get the same time as long
 /// words.
-class _KaraokeText extends StatelessWidget {
-  _KaraokeText({
+///
+/// Implementation: previously rebuilt a full `Text.rich` with N fresh
+/// `InlineSpan`s on every `posNotifier` tick. That forced text layout
+/// + glyph shaping every emission (~12 Hz on the throttle, but still
+/// per-tick work that's quadratic-ish in line length). Now the line is
+/// laid out exactly ONCE — when text or width changes — into two
+/// reusable [TextPainter]s (one dim, one bright). The `CustomPainter`
+/// listens to [posNotifier] directly via `super(repaint:)`, so a
+/// position tick triggers ONLY a paint pass, never a widget rebuild
+/// and never a re-layout. The bright text is drawn clipped to
+/// already-passed word boxes; the currently-transitioning word gets a
+/// `saveLayer` so its alpha can ease 0 → 1 without blowing up the cost.
+class _KaraokeText extends StatefulWidget {
+  const _KaraokeText({
     required this.text,
     required this.posNotifier,
     required this.start,
     required this.end,
-  })  : _words = _splitWords(text),
-        _wordRanges = _computeRanges(_splitWords(text));
+  });
 
   final String text;
   final ValueListenable<Duration> posNotifier;
   final Duration start;
   final Duration end;
 
-  // Cached once per build of this widget — splitting + range math is
-  // pure on the text, so doing it every frame would burn cycles for
-  // nothing. The ValueListenableBuilder below only re-runs the colour
-  // interpolation each tick.
-  final List<String> _words;
-  final List<(double, double)> _wordRanges;
+  @override
+  State<_KaraokeText> createState() => _KaraokeTextState();
+}
 
-  static List<String> _splitWords(String s) =>
-      s.split(RegExp(r'\s+'));
+class _KaraokeTextState extends State<_KaraokeText> {
+  TextPainter? _tpDim;
+  TextPainter? _tpBright;
 
-  static List<(double, double)> _computeRanges(List<String> words) {
-    final totalChars =
-        words.fold<int>(0, (a, w) => a + (w.isEmpty ? 1 : w.length));
-    final out = <(double, double)>[];
-    var charsSoFar = 0;
-    for (final w in words) {
-      final weight = w.isEmpty ? 1 : w.length;
-      final s = charsSoFar / totalChars;
-      charsSoFar += weight;
-      final e = charsSoFar / totalChars;
-      out.add((s, e));
+  // For each word, the rectangles its glyphs occupy in the laid-out
+  // text. Usually one rect per word; a word that wraps across visual
+  // lines (rare at fontSize 32 with the lyrics' generous padding) gets
+  // multiple. Used both as the clip path and to bound the saveLayer of
+  // the transitioning word.
+  List<List<Rect>> _wordBoxes = const [];
+
+  // Per-word (startProgress, endProgress) within the line — weighted by
+  // character count so "the" doesn't get the same time slice as
+  // "abracadabra".
+  List<(double, double)> _wordRanges = const [];
+
+  // Layout cache key. Re-layout only when one of these changes.
+  String? _laidOutText;
+  double? _laidOutWidth;
+  double? _laidOutFontSize;
+  FontWeight? _laidOutWeight;
+  double? _laidOutLetterSpacing;
+  double? _laidOutHeight;
+
+  void _ensureLayout(TextStyle base, double maxWidth) {
+    final text = widget.text.isEmpty ? '♪' : widget.text;
+    if (text == _laidOutText &&
+        maxWidth == _laidOutWidth &&
+        base.fontSize == _laidOutFontSize &&
+        base.fontWeight == _laidOutWeight &&
+        base.letterSpacing == _laidOutLetterSpacing &&
+        base.height == _laidOutHeight) {
+      return;
     }
-    return out;
+    _tpDim?.dispose();
+    _tpBright?.dispose();
+    final dimStyle = base.copyWith(color: _LyricLineRow._dimActive);
+    final brightStyle = base.copyWith(color: _LyricLineRow._bright);
+    _tpDim = TextPainter(
+      text: TextSpan(text: text, style: dimStyle),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: maxWidth);
+    _tpBright = TextPainter(
+      text: TextSpan(text: text, style: brightStyle),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: maxWidth);
+
+    // Tokenise into words on whitespace, record char ranges.
+    final charRanges = <(int, int)>[];
+    var i = 0;
+    while (i < text.length) {
+      while (i < text.length && _isWhitespace(text.codeUnitAt(i))) {
+        i++;
+      }
+      final wStart = i;
+      while (i < text.length && !_isWhitespace(text.codeUnitAt(i))) {
+        i++;
+      }
+      if (i > wStart) charRanges.add((wStart, i));
+    }
+
+    _wordBoxes = [
+      for (final r in charRanges)
+        _tpDim!
+            .getBoxesForSelection(
+              TextSelection(baseOffset: r.$1, extentOffset: r.$2),
+            )
+            .map((b) => b.toRect())
+            .toList(growable: false),
+    ];
+
+    final totalChars =
+        charRanges.fold<int>(0, (a, r) => a + (r.$2 - r.$1));
+    if (totalChars == 0) {
+      _wordRanges = const [];
+    } else {
+      final ranges = <(double, double)>[];
+      var soFar = 0;
+      for (final r in charRanges) {
+        final weight = r.$2 - r.$1;
+        final startFrac = soFar / totalChars;
+        soFar += weight;
+        final endFrac = soFar / totalChars;
+        ranges.add((startFrac, endFrac));
+      }
+      _wordRanges = ranges;
+    }
+
+    _laidOutText = text;
+    _laidOutWidth = maxWidth;
+    _laidOutFontSize = base.fontSize;
+    _laidOutWeight = base.fontWeight;
+    _laidOutLetterSpacing = base.letterSpacing;
+    _laidOutHeight = base.height;
+  }
+
+  static bool _isWhitespace(int c) =>
+      c == 0x20 || c == 0x09 || c == 0x0A || c == 0x0D;
+
+  @override
+  void dispose() {
+    _tpDim?.dispose();
+    _tpBright?.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final base = DefaultTextStyle.of(context).style;
-    if (_words.length <= 1) {
-      // Single-word lines have nothing to interpolate inside.
-      return Text(text);
-    }
-    final spanMs = end > start ? (end - start).inMilliseconds : 1;
-
-    return ValueListenableBuilder<Duration>(
-      valueListenable: posNotifier,
-      builder: (context, position, _) {
-        final elapsed =
-            (position - start).inMilliseconds.clamp(0, spanMs).toDouble();
-        final progress = elapsed / spanMs;
-
-        final spans = <InlineSpan>[];
-        for (var i = 0; i < _words.length; i++) {
-          final (wordStart, wordEnd) = _wordRanges[i];
-          final t = wordEnd == wordStart
-              ? 1.0
-              : ((progress - wordStart) / (wordEnd - wordStart))
-                  .clamp(0.0, 1.0);
-          final color = Color.lerp(
-            _LyricLineRow._dimActive,
-            _LyricLineRow._bright,
-            Curves.easeOut.transform(t),
-          )!;
-          spans.add(TextSpan(text: _words[i], style: TextStyle(color: color)));
-          if (i < _words.length - 1) {
-            spans.add(const TextSpan(text: ' '));
-          }
-        }
-
-        return Text.rich(
-          TextSpan(style: base, children: spans),
-          textAlign: TextAlign.left,
+    return LayoutBuilder(
+      builder: (ctx, c) {
+        _ensureLayout(base, c.maxWidth);
+        final dim = _tpDim!;
+        return CustomPaint(
+          size: Size(dim.size.width, dim.size.height),
+          painter: _KaraokePainter(
+            tpDim: dim,
+            tpBright: _tpBright!,
+            wordBoxes: _wordBoxes,
+            wordRanges: _wordRanges,
+            posNotifier: widget.posNotifier,
+            start: widget.start,
+            end: widget.end,
+          ),
         );
       },
     );
+  }
+}
+
+class _KaraokePainter extends CustomPainter {
+  _KaraokePainter({
+    required this.tpDim,
+    required this.tpBright,
+    required this.wordBoxes,
+    required this.wordRanges,
+    required this.posNotifier,
+    required this.start,
+    required this.end,
+  }) : super(repaint: posNotifier);
+
+  final TextPainter tpDim;
+  final TextPainter tpBright;
+  final List<List<Rect>> wordBoxes;
+  final List<(double, double)> wordRanges;
+  final ValueListenable<Duration> posNotifier;
+  final Duration start;
+  final Duration end;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Dim base — un-passed and partially-lit words read against this.
+    tpDim.paint(canvas, Offset.zero);
+
+    if (wordRanges.isEmpty) return;
+
+    final spanMs = end > start ? (end - start).inMilliseconds : 1;
+    final elapsed = (posNotifier.value - start)
+        .inMilliseconds
+        .clamp(0, spanMs)
+        .toDouble();
+    final progress = elapsed / spanMs;
+    if (progress <= 0) return;
+
+    // Fully-passed words: one clip path → one paint of the bright TP.
+    // Transitioning word (at most one — progress is monotonic): a
+    // saveLayer keyed by its eased t so it fades 0 → 1.
+    final fullPath = Path();
+    var anyFull = false;
+    int? transitioningIndex;
+    double transitioningEased = 0;
+    for (var i = 0; i < wordRanges.length; i++) {
+      final (wStart, wEnd) = wordRanges[i];
+      if (progress <= wStart) break;
+      if (progress >= wEnd) {
+        for (final r in wordBoxes[i]) {
+          fullPath.addRect(r);
+        }
+        anyFull = true;
+      } else {
+        final t = wEnd == wStart
+            ? 1.0
+            : ((progress - wStart) / (wEnd - wStart)).clamp(0.0, 1.0);
+        transitioningEased = Curves.easeOut.transform(t);
+        transitioningIndex = i;
+        break;
+      }
+    }
+    if (anyFull) {
+      canvas.save();
+      canvas.clipPath(fullPath);
+      tpBright.paint(canvas, Offset.zero);
+      canvas.restore();
+    }
+    if (transitioningIndex != null && transitioningEased > 0) {
+      final boxes = wordBoxes[transitioningIndex];
+      if (boxes.isNotEmpty) {
+        var bounds = boxes.first;
+        for (var k = 1; k < boxes.length; k++) {
+          bounds = bounds.expandToInclude(boxes[k]);
+        }
+        canvas.saveLayer(
+          bounds,
+          Paint()
+            ..color = Color.fromRGBO(255, 255, 255, transitioningEased),
+        );
+        final clip = Path();
+        for (final r in boxes) {
+          clip.addRect(r);
+        }
+        canvas.clipPath(clip);
+        tpBright.paint(canvas, Offset.zero);
+        canvas.restore();
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_KaraokePainter old) {
+    // Same TP + same word data → no repaint needed (the posNotifier
+    // drives repaints separately via `super(repaint:)`).
+    return !identical(old.tpDim, tpDim) ||
+        !identical(old.tpBright, tpBright) ||
+        !identical(old.wordBoxes, wordBoxes) ||
+        !identical(old.wordRanges, wordRanges) ||
+        old.start != start ||
+        old.end != end;
   }
 }
 

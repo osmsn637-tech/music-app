@@ -114,7 +114,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final themeMode = ref.watch(themeModeProvider);
     final djVoice = ref.watch(djVoiceProvider);
     final defaultMode = ref.watch(defaultDjModeProvider);
-    final liveWallpaper = ref.watch(liveWallpaperProvider);
     final storage = ref.watch(_storageInfoProvider);
 
     final colors = Theme.of(context).colorScheme;
@@ -138,7 +137,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   controller: _urlController,
                   decoration: const InputDecoration(
                     labelText: 'Server URL',
-                    hintText: 'http://192.168.1.20:8000',
+                    hintText: 'http://192.101.2.87:8000',
                     border: OutlineInputBorder(),
                   ),
                   keyboardType: TextInputType.url,
@@ -180,16 +179,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ),
               ],
             ),
-          ),
-          SwitchListTile(
-            title: const Text('Live wallpaper'),
-            subtitle: const Text(
-              'Drifting, touch-reactive blobs in the background. Turn off '
-              'for a cleaner look that lets the glass UI breathe.',
-            ),
-            value: liveWallpaper,
-            onChanged: (v) =>
-                ref.read(liveWallpaperProvider.notifier).set(v),
           ),
           const Divider(height: 32),
           _SectionHeader(text: 'AI DJ'),

@@ -5,7 +5,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:just_audio/just_audio.dart';
 
 import '../../core/services/providers.dart';
 import '../../data/database/app_database.dart';
@@ -13,6 +12,7 @@ import '../../data/database/providers.dart';
 import '../../data/models/remote_artist.dart';
 import '../lyrics/lyrics_hook_extractor.dart';
 import '../player/now_playing_controller.dart';
+import '../player/player_service.dart';
 import '../player/providers.dart';
 import 'ai_dj_service.dart';
 import 'dj_intent_selector.dart';
@@ -125,7 +125,7 @@ class AiDjQueueController extends StateNotifier<AiDjQueueState> {
   }
 
   final Ref _ref;
-  StreamSubscription<PlayerState>? _stateSub;
+  StreamSubscription<PlayerSnapshot>? _stateSub;
   StreamSubscription<Duration>? _posSub;
   StreamSubscription<Duration?>? _durSub;
   StreamSubscription<bool>? _bankSpeakingSub;
@@ -452,8 +452,8 @@ class AiDjQueueController extends StateNotifier<AiDjQueueState> {
     return demerit;
   }
 
-  void _onPlayerState(PlayerState ps) {
-    if (ps.processingState != ProcessingState.completed) return;
+  void _onPlayerState(PlayerSnapshot ps) {
+    if (ps.processingState != PlayerProcessingState.completed) return;
     debugPrint(
       '[aidj] completed event '
       'isActive=${state.isActive} advancing=$_advancing '

@@ -1,15 +1,14 @@
 import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
-import 'package:just_audio/just_audio.dart' as ja;
 
 import '../../data/database/app_database.dart';
 import '../../features/player/player_service.dart';
 
-/// Bridge between our two-deck [PlayerService] and the OS playback notification
-/// (lockscreen widget, Bluetooth media buttons, Wear OS controls). Owned as a
-/// singleton via [AudioService.init] in `main.dart` and exposed through a
-/// Riverpod provider.
+/// Bridge between our soloud-backed [PlayerService] and the OS playback
+/// notification (lockscreen widget, Bluetooth media buttons, Wear OS
+/// controls). Owned as a singleton via [AudioService.init] in `main.dart`
+/// and exposed through a Riverpod provider.
 ///
 /// Lockscreen commands route through [AppAudioHandler] back into our app:
 ///   - play / pause / seek → directly to the active deck of [PlayerService].
@@ -32,14 +31,14 @@ class AppAudioHandler extends BaseAudioHandler with SeekHandler {
 
   final PlayerService _service;
 
-  StreamSubscription<ja.PlayerState>? _stateSub;
+  StreamSubscription<PlayerSnapshot>? _stateSub;
   StreamSubscription<Duration>? _posSub;
   StreamSubscription<Duration?>? _durSub;
 
   Duration _position = Duration.zero;
   Duration? _duration;
   bool _playing = false;
-  ja.ProcessingState _processing = ja.ProcessingState.idle;
+  PlayerProcessingState _processing = PlayerProcessingState.idle;
 
   /// Installed by AiDjQueueController so lockscreen / Bluetooth "next" gets
   /// the same negative-signal treatment as the in-app skip button.
@@ -97,7 +96,7 @@ class AppAudioHandler extends BaseAudioHandler with SeekHandler {
 
   // ---- bridge from PlayerService streams to playbackState --------------
 
-  void _onPlayerState(ja.PlayerState ps) {
+  void _onPlayerState(PlayerSnapshot ps) {
     _playing = ps.playing;
     _processing = ps.processingState;
     _emit();
@@ -134,17 +133,15 @@ class AppAudioHandler extends BaseAudioHandler with SeekHandler {
     ));
   }
 
-  AudioProcessingState _mapProcessing(ja.ProcessingState ps) {
+  AudioProcessingState _mapProcessing(PlayerProcessingState ps) {
     switch (ps) {
-      case ja.ProcessingState.idle:
+      case PlayerProcessingState.idle:
         return AudioProcessingState.idle;
-      case ja.ProcessingState.loading:
+      case PlayerProcessingState.loading:
         return AudioProcessingState.loading;
-      case ja.ProcessingState.buffering:
-        return AudioProcessingState.buffering;
-      case ja.ProcessingState.ready:
+      case PlayerProcessingState.ready:
         return AudioProcessingState.ready;
-      case ja.ProcessingState.completed:
+      case PlayerProcessingState.completed:
         return AudioProcessingState.completed;
     }
   }

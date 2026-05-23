@@ -22,7 +22,11 @@ final listeningTrackerProvider = Provider<ListeningTracker>((ref) {
   // provider container.
   final player = ref.watch(playerServiceProvider);
   final posSub = player.positionStream.listen((pos) {
-    final dur = player.raw.duration;
+    // SoLoud-backed PlayerService exposes the active deck's known
+    // duration as a snapshot (`currentDuration`) instead of a per-call
+    // accessor on a raw player. Same semantics: nullable until the
+    // first track's length is read.
+    final dur = player.currentDuration;
     tracker.onPosition(pos, dur);
   });
   final stateSub = player.playerStateStream.listen((state) {

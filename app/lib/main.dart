@@ -1,18 +1,19 @@
 import 'dart:io' show Platform;
 
 import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:just_audio/just_audio.dart';
+import 'package:flutter_soloud/flutter_soloud.dart';
 
 import 'app.dart';
 import 'core/services/audio_handler.dart';
 import 'features/player/player_service.dart';
 
-/// True once AudioService.init() completed. While false, the audio_service
-/// plugin auto-registers as the platform but its handler is null — touching
-/// any AudioPlayer.setAudioSource would crash. PlayerService gates on this.
+/// True once SoLoud.init() and AudioService.init() completed. While false
+/// PlayerService.playSong throws — there's no functional audio engine
+/// to play into.
 bool audioBackgroundReady = false;
 String? audioBackgroundInitError;
 
@@ -21,32 +22,42 @@ String? audioBackgroundInitError;
 /// failed or hasn't run yet.
 AppAudioHandler? globalAudioHandler;
 
-/// Process-wide PlayerService. The handler holds a reference too; this
-/// global is what the Riverpod provider returns. Single instance.
+/// Process-wide PlayerService (soloud-backed). The handler holds a
+/// reference too; this global is what the Riverpod provider returns.
 PlayerService? globalPlayerService;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Background playback only works on Android / iOS / macOS. On other
-  // platforms (Windows desktop, Linux, web) skipping init avoids
-  // UnimplementedError from blocking app boot.
   if (!kIsWeb && (Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
     try {
-      final service = PlayerService(AudioPlayer(), AudioPlayer());
+      // 1. iOS / Android audio category. Used to advertise that we're a
+      //    music app (allows background playback, ducks Siri, respects
+      //    AirPods route changes). Was implicitly handled by
+      //    just_audio_background; now explicit.
+      final session = await AudioSession.instance;
+      await session.configure(const AudioSessionConfiguration.music());
+
+      // 2. Boot the SoLoud engine. Idempotent if already initialised by
+      //    a previous hot restart.
+      await SoLoud.instance.init();
+
+      // 3. Build the player service + audio_service handler. The
+      //    service's enableVisualization() sets BOTH the visualisation
+      //    flag AND drops FFT smoothing — necessary for the
+      //    bass-onset detector to see kick transients instead of a
+      //    pre-averaged mush.
+      final service = PlayerService();
+      service.enableVisualization();
       globalPlayerService = service;
       globalAudioHandler = await AudioService.init(
         builder: () => AppAudioHandler(service),
         config: const AudioServiceConfig(
           androidNotificationChannelId: 'com.music_app.audio',
           androidNotificationChannelName: 'Music playback',
-          // `androidNotificationOngoing: true` requires the FG service to
-          // stop on pause (an audio_service assertion — otherwise the app
-          // becomes non-stoppable). For a music app we want the OPPOSITE:
-          // the notification has to survive audio-focus changes (when
-          // another app plays) without the user losing control. So we
-          // skip the "ongoing" flag and instead keep the FG service alive
-          // across pauses — that's what actually anchors the notification.
+          // Same rationale as before — we want the FG service to outlive
+          // pauses so the lockscreen notification stays alive across
+          // audio-focus changes.
           androidNotificationOngoing: false,
           androidStopForegroundOnPause: false,
           androidResumeOnClick: true,
@@ -55,7 +66,7 @@ Future<void> main() async {
       );
       audioBackgroundReady = true;
       // ignore: avoid_print
-      print('[audio] AudioService.init OK');
+      print('[audio] SoLoud + AudioService init OK');
     } catch (e, st) {
       audioBackgroundInitError = '$e';
       // Loud, never-stripped output so we can see this in flutter logs
@@ -63,7 +74,7 @@ Future<void> main() async {
       // ignore: avoid_print
       print('==========================================');
       // ignore: avoid_print
-      print('[audio] AudioService.init FAILED');
+      print('[audio] SoLoud / AudioService init FAILED');
       // ignore: avoid_print
       print('[audio] error: $e');
       // ignore: avoid_print
@@ -72,10 +83,17 @@ Future<void> main() async {
       print('==========================================');
     }
   } else {
-    // Desktop / web — no background audio plugin to worry about, so
-    // plain just_audio works. Treat as "ready" to skip the gate.
-    audioBackgroundReady = true;
-    globalPlayerService = PlayerService(AudioPlayer(), AudioPlayer());
+    // Desktop / web — soloud can still run, but skip the audio_service
+    // wrapping (no mobile-style lockscreen there anyway).
+    try {
+      await SoLoud.instance.init();
+      final service = PlayerService();
+      service.enableVisualization();
+      audioBackgroundReady = true;
+      globalPlayerService = service;
+    } catch (e) {
+      audioBackgroundInitError = '$e';
+    }
   }
 
   runApp(const ProviderScope(child: MusicApp()));

@@ -16,7 +16,8 @@ import '../../features/search/search_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/album_art.dart';
 import '../widgets/glass.dart';
-import '../widgets/mini_player.dart' show openPlayerRoute;
+import '../widgets/playlist_cover.dart';
+import '../../features/player/player_expansion_controller.dart';
 import '../widgets/song_actions.dart';
 import '../widgets/song_tile.dart';
 import 'home_shell_providers.dart';
@@ -39,9 +40,85 @@ class _AlbumRollup {
   final int songCount;
 }
 
-/// Roll up the songs stream into one entry per (artist, album) pair.
-/// Returns `AsyncValue<List<_AlbumRollup>>` so the consumer can render
-/// the same loading/error/data states the upstream songs provider exposes.
+/// Normalises an artist or album string into a stable key for grouping.
+/// Catches the most common reasons two songs that belong on the same
+/// album end up in separate buckets. The strategy is aggressive on
+/// purpose — the *key* is throwaway, only used for matching; the
+/// original strings stay intact for display, so over-stripping can
+/// only merge things, never visually change a name. Handled cases:
+///   - extra / inconsistent whitespace + case
+///   - smart quotes & en/em-dashes / unicode punctuation
+///   - ANY parenthetical / bracketed / braced content (year stamps,
+///     "[EP]", "(Single)", "(Original Motion Picture Soundtrack)" etc.
+///     are all dropped, not just a hand-picked keyword list)
+///   - leading track-number prefixes like "01 - " or "01. "
+///   - punctuation differences ("Don't" vs "Dont", "Damn." vs "Damn",
+///     "U2: Achtung Baby" vs "U2 Achtung Baby")
+///   - "feat. X" / "ft. X" / "& X" / "with X" / ", X" suffixes on the
+///     artist field
+///   - leading "The " on the artist
+String _normalizeAlbumKey(String s) {
+  var n = s.trim().toLowerCase();
+  // Smart punctuation → ASCII so a typed-by-hand title and a
+  // tag-imported one collapse before the punctuation-strip step.
+  n = n
+      .replaceAll('‘', "'")
+      .replaceAll('’', "'")
+      .replaceAll('“', '"')
+      .replaceAll('”', '"')
+      .replaceAll('–', '-')
+      .replaceAll('—', '-');
+  // Drop ALL parenthetical / bracketed / braced content. Year stamps
+  // "(2020)", format markers "[EP]" / "[Single]", soundtrack tags,
+  // and editorial suffixes all disappear — they almost never indicate
+  // a genuinely different album.
+  n = n.replaceAll(RegExp(r'\s*[\(\[\{][^\)\]\}]*[\)\]\}]'), ' ');
+  // Strip leading track-number prefixes ("01 - ", "01. ", "01 ").
+  n = n.replaceFirst(RegExp(r'^\d+\s*[-.\s]\s*'), '');
+  // Reduce to alphanumeric + space. Periods, commas, colons,
+  // apostrophes, exclamation marks etc. all collapse so "Damn." and
+  // "Damn" — or "Don't" and "Dont" — share a key.
+  n = n.replaceAll(RegExp(r'[^a-z0-9\s]'), ' ');
+  n = n.replaceAll(RegExp(r'\s+'), ' ').trim();
+  return n;
+}
+
+/// Title-cases an album name so the card never displays as "album" or
+/// "ALBUM" — always "Album". Words shorter than 4 letters keep their
+/// natural form so common stopwords stay lowercase ("of the", "and",
+/// etc.) and acronyms (U2, NWA) aren't damaged. The first word is
+/// always capitalised regardless.
+String _displayAlbumName(String s) {
+  final trimmed = s.trim();
+  if (trimmed.isEmpty) return trimmed;
+  final parts = trimmed.split(RegExp(r'\s+'));
+  return parts.asMap().entries.map((entry) {
+    final i = entry.key;
+    final word = entry.value;
+    if (word.isEmpty) return word;
+    // Leave existing capitals alone — protects acronyms, brand names,
+    // stylised titles (e.g. "DAMN."). Only fix words that are fully
+    // lowercase or fully uppercase.
+    final lower = word.toLowerCase();
+    final upper = word.toUpperCase();
+    final isAllOneCase = word == lower || word == upper;
+    if (!isAllOneCase) return word;
+    final stopwords = i == 0
+        ? const <String>{}
+        : const {
+            'a', 'an', 'the', 'of', 'and', 'or', 'but', 'in', 'on',
+            'at', 'to', 'for', 'by', 'with', 'as', 'from', 'is',
+          };
+    if (stopwords.contains(lower)) return lower;
+    return lower[0].toUpperCase() + lower.substring(1);
+  }).join(' ');
+}
+
+/// Roll up the songs stream into one entry per album. Songs are
+/// grouped by *album name only* (not artist) so a single album's
+/// songs collapse into one card even when their tagged artist field
+/// drifts (different "feat." spellings, blank artist on some tracks,
+/// compilation albums where every track has a different artist).
 final _albumsProvider =
     Provider.autoDispose<AsyncValue<List<_AlbumRollup>>>((ref) {
   final asyncSongs = ref.watch(allSongsProvider);
@@ -50,7 +127,8 @@ final _albumsProvider =
     for (final s in songs) {
       final album = s.album;
       if (album == null || album.isEmpty) continue;
-      final key = '${s.artist ?? 'unknown'}|$album';
+      final key = _normalizeAlbumKey(album);
+      if (key.isEmpty) continue;
       (byKey[key] ??= <SongRow>[]).add(s);
     }
     final rolls = byKey.entries.map((e) {
@@ -60,7 +138,7 @@ final _albumsProvider =
         orElse: () => list.first,
       );
       return _AlbumRollup(
-        name: cover.album!,
+        name: _displayAlbumName(cover.album!),
         artist: cover.artist ?? '',
         coverPath: cover.localArtworkPath,
         coverSeed: 'al_${cover.id}',
@@ -264,7 +342,7 @@ class _SongsSliver extends ConsumerWidget {
       return;
     }
     if (!context.mounted) return;
-    Navigator.of(context).push(openPlayerRoute());
+    PlayerExpansionScope.read(context).expand();
   }
 }
 
@@ -499,10 +577,12 @@ class _PlaylistsSliver extends ConsumerWidget {
                           Expanded(
                             child: AspectRatio(
                               aspectRatio: 1,
-                              child: AlbumArt(
-                                seed: 'pl_${pl.id}',
-                                size: double.infinity,
-                                radius: LumenTokens.rXs,
+                              child: LayoutBuilder(
+                                builder: (context, c) => PlaylistCover(
+                                  playlistId: pl.id,
+                                  size: c.maxWidth,
+                                  radius: LumenTokens.rXs,
+                                ),
                               ),
                             ),
                           ),

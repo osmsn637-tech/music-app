@@ -10,7 +10,7 @@ import '../../features/ai_dj/providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/album_art.dart';
 import '../widgets/glass.dart';
-import '../widgets/mini_player.dart' show openPlayerRoute;
+import '../../features/player/player_expansion_controller.dart';
 
 /// Flacko — the redesigned AI DJ screen.
 ///
@@ -145,7 +145,7 @@ class _AiDjScreenState extends ConsumerState<AiDjScreen> {
             current: current,
             isPlaying: state.isActive,
             onOpenPlayer: () =>
-                Navigator.of(context).push(openPlayerRoute()),
+                PlayerExpansionScope.read(context).expand(),
           ),
         ),
 

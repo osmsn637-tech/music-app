@@ -11,6 +11,7 @@ class Glass extends StatelessWidget {
     required this.child,
     this.strong = false,
     this.borderRadius = 16,
+    this.shape,
     this.padding,
     this.blur = true,
   });
@@ -18,11 +19,18 @@ class Glass extends StatelessWidget {
   final Widget child;
   final bool strong;
   final double borderRadius;
+
+  /// Overrides [borderRadius] when set — pass a non-circular geometry
+  /// (e.g. `BorderRadius.vertical(top: Radius.circular(22))`) for panels
+  /// that need top-only or bottom-only corner rounding.
+  final BorderRadius? shape;
   final EdgeInsetsGeometry? padding;
 
   /// When false, skip the `BackdropFilter`. Use on panels whose content
   /// is mostly opaque — the fullscreen blur would be invisible work.
   final bool blur;
+
+  BorderRadius get _radius => shape ?? BorderRadius.circular(borderRadius);
 
   @override
   Widget build(BuildContext context) {
@@ -52,7 +60,7 @@ class Glass extends StatelessWidget {
     final pane = Container(
       decoration: BoxDecoration(
         color: fill,
-        borderRadius: BorderRadius.circular(borderRadius),
+        borderRadius: _radius,
         border: Border.all(color: borderColor, width: 1),
         boxShadow: [
           BoxShadow(
@@ -69,7 +77,7 @@ class Glass extends StatelessWidget {
             child: IgnorePointer(
               child: Container(
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(borderRadius),
+                  borderRadius: _radius,
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
@@ -94,7 +102,7 @@ class Glass extends StatelessWidget {
     );
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(borderRadius),
+      borderRadius: _radius,
       child: blur
           ? BackdropFilter(
               filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),

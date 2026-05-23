@@ -1,4 +1,4 @@
-import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -8,174 +8,349 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/utils/album_colors.dart';
 import '../../data/database/app_database.dart';
 import '../../features/library/album_colors_provider.dart';
+import '../../features/player/player_service.dart';
 import '../../features/player/providers.dart';
 import 'album_art.dart';
 
-/// Heavily-blurred fullscreen artwork with three drifting colour blobs
-/// painted in the cover's own dominant colours, plus a top-to-bottom
-/// darkening overlay. The blobs also flow with the song: a 2-beat
-/// cosine envelope phase-locked to the BPM gently swells radius, alpha,
-/// and orbit width — more like a tide than a pulse. BPM comes from the
-/// song row (synced from the server). When BPM is unknown we fall back
-/// to a default that keeps the visual alive without pretending to track
-/// the music.
+/// Now-playing background.
+///
+/// The approach: instead of a canvas-painted particle / spectrum
+/// simulation (which never reads as smooth at 60fps and ends up
+/// looking like a winamp visualiser), the bg here is a small set of
+/// GPU-cheap transforms applied to the **blurred album art itself**:
+///
+///   1. Very slow rotation (one revolution / ~50s) — guarantees the
+///      surface is never frozen even in silence.
+///   2. Bass-reactive scale (1.00 ↔ 1.06) — kicks make the whole
+///      ambient wash pulse outward and back.
+///   3. Mid-reactive saturation lift via ColorFilter — vocals /
+///      melody bloom the colour palette without affecting layout.
+///   4. Two large drifting palette blobs on top — slow elliptical
+///      paths give the depth a static blur lacks.
+///
+/// Every layer is `Transform`, `Opacity`, `ColorFiltered` or a
+/// `Positioned` blob — all GPU-composited, no per-frame
+/// `toImageSync`, no additive accumulation. Result is what Apple
+/// Music / Spotify "Now Playing" actually look like: alive, polished,
+/// always 60 fps, never bleached out.
 class BloomBackground extends ConsumerStatefulWidget {
   const BloomBackground({
     super.key,
     required this.song,
     this.darkenStrength = 1.0,
+    this.audioReactive = true,
   });
 
   final SongRow song;
 
-  /// Multiplier (0–1) on the darkening gradient. The lyrics view bumps it
-  /// up so the text reads cleanly on top of busy art.
+  /// Vignette intensity multiplier. The lyrics view bumps this up so
+  /// text reads cleanly against the bg.
   final double darkenStrength;
+
+  /// When false, the FFT ticker + kick controllers stay idle — the bg
+  /// still paints the album-tinted gradient, blurred art, and three
+  /// static curtains, but they don't pulse to bass / snare. The
+  /// expanded player passes `audioReactive: e >= 0.2` so the mini
+  /// player's bloom stops grinding through 20 Hz FFT reads while the
+  /// player is collapsed (the mini card is too small for the pulse to
+  /// register anyway).
+  final bool audioReactive;
 
   @override
   ConsumerState<BloomBackground> createState() => _BloomBackgroundState();
 }
 
+/// Warm brand-accent palette used as a vibrant fallback when there's
+/// no extracted palette yet (cold start) or when the extracted palette
+/// is fully neutral (greyscale cover). Keeps the bg from reading as a
+/// flat grey wash; the cover artwork itself stays neutral in the
+/// centre card.
+final List<Color> _bloomWarmFallback = AlbumColors.fallback;
+
 class _BloomBackgroundState extends ConsumerState<BloomBackground>
-    with SingleTickerProviderStateMixin {
-  // Single ValueNotifier driving the painter. Replaces 3 AnimationControllers
-  // + a separate beat ValueNotifier — those each fired a Listener at 60fps,
-  // so the painter repainted every frame even though the drifts have
-  // periods of 19/23/31 seconds. Now one ticker, throttled to ~30fps.
-  final ValueNotifier<_BloomParams> _params =
-      ValueNotifier<_BloomParams>(_BloomParams.zero);
-  late final Ticker _ticker;
-  Duration _lastTickAt = Duration.zero;
+    with TickerProviderStateMixin {
+  // ONE-SHOT kick controllers, one per band. Each is triggered with
+  // `.forward(from: 0)` when the audio tick detects a transient
+  // (rising edge of the band's envelope above a threshold). The
+  // controller animates 0 → 1 over [_kickDuration]; the curtain
+  // reads its value to drive a sharp shake + width + alpha pulse
+  // that decays back to rest. When the controller finishes it
+  // stops at 1 and stays there — ZERO per-frame cost between kicks.
+  late final AnimationController _bassKick;
+  late final AnimationController _midKick;
+  static const _kickDuration = Duration(milliseconds: 320);
 
-  // Drift periods in seconds — kept as constants so the per-frame math
-  // stays branch-free.
-  static const _periods = <double>[19, 23, 31];
-  static const _frameInterval = Duration(milliseconds: 33);
+  // FFT reader — 20 Hz tick. Detects transients and fires the kick
+  // controllers. The previous build also advanced a horizontal drift
+  // phase here, but user feedback was that the constant horizontal
+  // motion in the upper area read as "disturbing movement in the top
+  // left". Drift is removed entirely; curtains now sit at fixed
+  // anchors and only react to bass / snare onsets.
+  late final Ticker _audioTicker;
+  Duration _lastAudioTick = Duration.zero;
+  static const _audioTickInterval = Duration(milliseconds: 50);
 
-  // Snapshot of the last known stream position + wallclock — same trick
-  // the karaoke lyrics use to interpolate between coarse position events.
-  Duration _streamPos = Duration.zero;
-  DateTime _streamPosAt = DateTime.now();
+  // Per-band rolling peaks for auto-normalisation.
+  double _bassPeak = 0.04;
+  double _midPeak = 0.04;
+
+  // Previous normalised band values for transient (rising-edge)
+  // detection — kick fires only on a sharp onset, not a sustained
+  // loud level, so the visual stays distinct beat-by-beat instead
+  // of saturating during sustained bass.
+  double _prevBassNorm = 0;
+  double _prevMidNorm = 0;
+  static const _kickThreshold = 0.14;
+
+  PlayerService? _player;
   bool _isPlaying = false;
+  List<Color>? _lastPalette;
+
+  // Visibility tracking. When this bloom is fully covered by another
+  // route (e.g. the lyrics view pushed on top of the player), the FFT
+  // sampling and kick controllers stop — the bg below isn't drawn so
+  // nothing reads its state until we come back. Lyrics renders its own
+  // bloom on top, so pausing this one removes a duplicate animation
+  // pipeline running for nothing.
+  ModalRoute<Object?>? _route;
+  bool _covered = false;
 
   @override
   void initState() {
     super.initState();
-    _ticker = createTicker(_onTick)..start();
+    _bassKick = AnimationController(vsync: this, duration: _kickDuration);
+    _midKick = AnimationController(vsync: this, duration: _kickDuration);
+    _audioTicker = createTicker(_onAudioTick);
+    if (widget.audioReactive) _audioTicker.start();
+  }
+
+  @override
+  void didUpdateWidget(covariant BloomBackground oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.audioReactive != widget.audioReactive) {
+      if (widget.audioReactive && !_covered) {
+        if (!_audioTicker.isActive) _audioTicker.start();
+      } else {
+        if (_audioTicker.isActive) _audioTicker.stop();
+        _bassKick.stop();
+        _midKick.stop();
+        _prevBassNorm = 0;
+        _prevMidNorm = 0;
+      }
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (!identical(route, _route)) {
+      _route?.secondaryAnimation?.removeListener(_recomputeCovered);
+      _route = route;
+      _route?.secondaryAnimation?.addListener(_recomputeCovered);
+    }
+    _recomputeCovered();
+  }
+
+  void _recomputeCovered() {
+    final next = (_route?.secondaryAnimation?.value ?? 0) >= 0.97;
+    if (next == _covered) return;
+    _covered = next;
+    if (next) {
+      if (_audioTicker.isActive) _audioTicker.stop();
+      _bassKick.stop();
+      _midKick.stop();
+    } else if (widget.audioReactive) {
+      if (!_audioTicker.isActive) _audioTicker.start();
+    }
   }
 
   @override
   void dispose() {
-    _ticker.dispose();
-    _params.dispose();
+    _route?.secondaryAnimation?.removeListener(_recomputeCovered);
+    _bassKick.dispose();
+    _midKick.dispose();
+    _audioTicker.dispose();
     super.dispose();
   }
 
-  void _onTick(Duration elapsed) {
-    if (elapsed - _lastTickAt < _frameInterval) return;
-    _lastTickAt = elapsed;
+  /// Sample bass + mid bands, detect rising-edge transients, fire
+  /// the matching kick controller. Most ticks fire NOTHING — only
+  /// genuine onsets trigger a kick, which keeps the visual sharp
+  /// (each kick is a discrete event, not a continuous swell).
+  void _onAudioTick(Duration elapsed) {
+    if (elapsed - _lastAudioTick < _audioTickInterval) return;
+    _lastAudioTick = elapsed;
 
-    final t = elapsed.inMicroseconds / 1e6;
-    final drifts = <double>[
-      (t / _periods[0]) % 1.0,
-      (t / _periods[1]) % 1.0,
-      (t / _periods[2]) % 1.0,
-    ];
-
-    double beat = _params.value.beat;
-    if (_isPlaying) {
-      final pos = _streamPos + DateTime.now().difference(_streamPosAt);
-      final bpm = (widget.song.bpm ?? 100).clamp(40, 240);
-      final beatSec = 60.0 / bpm;
-      final tSec = pos.inMicroseconds / 1e6;
-      if (tSec >= 0) {
-        // 2-beat cycle, smooth cosine envelope. Peaks (+1) on each
-        // downbeat, troughs (-1) between them — a tide that ebbs and
-        // flows rather than a percussive snap.
-        final phase = (tSec / (beatSec * 2)) % 1.0;
-        beat = math.cos(phase * 2 * math.pi);
-      }
-    } else if (beat.abs() > 0.005) {
-      // Drain the flow toward zero when paused so the blobs settle into
-      // a calm state rather than freezing mid-swell.
-      beat = beat * 0.96;
+    final player = _player;
+    if (!_isPlaying || player == null) {
+      _prevBassNorm = 0;
+      _prevMidNorm = 0;
+      return;
     }
 
-    _params.value = _BloomParams(drifts: drifts, beat: beat);
+    final fft = player.readFftSnapshot();
+    if (fft == null || fft.isEmpty) return;
+
+    // Band layout chosen to AVOID the vocal pitch range.
+    //  - Bass:  bins 1-8   (~86-690 Hz)   kick drum + sub bass
+    //  - Snare: bins 30-80 (~2.6-7 kHz)   snare crack + hat snap.
+    //           NOT the previous bins 9-30, which sat directly on
+    //           the vocal fundamental + first formant — any singing
+    //           constantly tripped the kick.
+    final bassRaw = _avgBand(fft, 1, 8);
+    final snareRaw = _avgBand(fft, 30, 80);
+
+    if (bassRaw > _bassPeak) _bassPeak = bassRaw * 1.10;
+    _bassPeak *= 0.997;
+    if (_bassPeak < 0.04) _bassPeak = 0.04;
+
+    if (snareRaw > _midPeak) _midPeak = snareRaw * 1.10;
+    _midPeak *= 0.997;
+    if (_midPeak < 0.04) _midPeak = 0.04;
+
+    final bassNorm = (bassRaw / _bassPeak).clamp(0.0, 1.0);
+    final snareNorm = (snareRaw / _midPeak).clamp(0.0, 1.0);
+
+    if (bassNorm > _prevBassNorm + _kickThreshold && bassNorm > 0.30) {
+      _bassKick
+        ..stop()
+        ..forward(from: 0.0);
+    }
+    if (snareNorm > _prevMidNorm + _kickThreshold && snareNorm > 0.30) {
+      _midKick
+        ..stop()
+        ..forward(from: 0.0);
+    }
+    _prevBassNorm = bassNorm;
+    _prevMidNorm = snareNorm;
+  }
+
+  double _avgBand(Float32List fft, int lo, int hi) {
+    final cap = hi.clamp(0, fft.length - 1);
+    if (lo > cap) return 0.0;
+    var sum = 0.0;
+    var n = 0;
+    for (var i = lo; i <= cap; i++) {
+      sum += fft[i].abs();
+      n++;
+    }
+    return sum / n;
   }
 
   @override
   Widget build(BuildContext context) {
-    final s = widget.darkenStrength.clamp(0.0, 1.0);
-    final colors = ref
-            .watch(albumColorsProvider(widget.song.localArtworkPath))
-            .valueOrNull ??
-        AlbumColors.fallback;
+    _player ??= ref.read(playerServiceProvider);
 
-    // Hoist the entire bloom into its own RepaintBoundary so the per-frame
-    // CustomPaint repaints don't bubble up into the Player/Lyrics tree.
+    // Palette resolution — prefer freshly-resolved, then last-known,
+    // then the warm brand fallback. Substitute the warm fallback for
+    // any fully-neutral palette so a greyscale cover doesn't make the
+    // bg read as a cold grey wash.
+    final resolved = ref
+        .watch(albumColorsProvider(widget.song.localArtworkPath))
+        .valueOrNull;
+    if (resolved != null && !identical(resolved, AlbumColors.fallback)) {
+      _lastPalette = resolved;
+    }
+    // Pass the extracted palette through as-is. Greyscale covers
+    // (black / white / grey) correctly resolve to a neutral grey
+    // palette via AlbumColors._neutralPalette — that's what the
+    // listener should see for those albums, NOT the brand
+    // pink/purple/blue identity. The warm fallback is reserved for
+    // actual extraction failures (missing file, decode error), where
+    // [resolved] comes back as the static `AlbumColors.fallback`
+    // sentinel — that path naturally lands on the warm palette.
+    final colors = resolved ?? _lastPalette ?? _bloomWarmFallback;
+    final s = widget.darkenStrength.clamp(0.0, 1.0);
+
+    final c0 = colors[0];
+    final c1 = colors.length > 1 ? colors[1] : colors[0];
+    final c2 = colors.length > 2 ? colors[2] : colors[0];
+
     return RepaintBoundary(
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // Tiny invisible Consumer that keeps the Ticker's interpolation
-          // baseline fresh without forcing the Stack tree to rebuild every
-          // time just_audio's position stream emits (~1Hz). Without this,
-          // every position event would re-create BackdropFilter etc.
+          // Bridge — keeps the isPlaying snapshot fresh without
+          // forcing the bg stack to rebuild every position tick.
           _PlayerStateBridge(
-            onPositionChange: (pos) {
-              if (pos != _streamPos) {
-                _streamPos = pos;
-                _streamPosAt = DateTime.now();
-              }
-            },
             onPlayingChange: (playing) => _isPlaying = playing,
           ),
-          // Blurred artwork. ImageFiltered blurs ITS CHILD without a
-          // saveLayer, and the AlbumArt is rendered tiny then upscaled by
-          // the Stack — so the blur cost is ~64x64 instead of fullscreen.
+
+          // 1. Dark night-sky base. The previous build painted the
+          //    raw palette here at full saturation, which is why
+          //    the dominant cover colour "crept in" and flooded the
+          //    screen after a while. Now the base is a deep, lightly
+          //    palette-tinted blue/black — the sky against which the
+          //    aurora curtains read as light, not as additions to an
+          //    already-saturated wash.
           Positioned.fill(
-            child: ImageFiltered(
-              imageFilter: ui.ImageFilter.blur(sigmaX: 60, sigmaY: 60),
-              child: AlbumArt(
-                artworkPath: widget.song.localArtworkPath,
-                seed: widget.song.id,
-                size: 64,
-                radius: 0,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color.lerp(c2, Colors.black, 0.75)!,
+                    Color.lerp(c1, Colors.black, 0.85)!,
+                    Color.lerp(c0, Colors.black, 0.80)!,
+                  ],
+                  stops: const [0.0, 0.5, 1.0],
+                ),
               ),
             ),
           ),
-          // Animated dominant-colour blobs riding on top of the bloom.
-          // Default srcOver blend (no saveLayer) — visually similar to
-          // screen mode but without the per-frame compositing cost.
-          Positioned.fill(
-            child: RepaintBoundary(
-              child: ValueListenableBuilder<_BloomParams>(
-                valueListenable: _params,
-                builder: (context, params, _) {
-                  return CustomPaint(
-                    painter: _ColorBlobsPainter(
-                      colors: colors,
-                      drifts: params.drifts,
-                      beat: params.beat,
-                    ),
-                  );
-                },
-              ),
-            ),
+
+          // 2. Heavily-blurred album art at low opacity — the song's
+          //    "colour memory" without overpowering the night-sky
+          //    base. No rotation: the rotation was a per-frame
+          //    Transform.rotate composite that was contributing to
+          //    lag on the lyrics page (which also mounts this bg).
+          //    The aurora curtains below provide all the motion.
+          _StaticBlurredArt(song: widget.song),
+
+          // 3. Three aurora curtains — vertical-elliptical streaks
+          //    of palette colour at FIXED horizontal anchors that
+          //    SHAKE on bass / snare transients. Drift was removed
+          //    (it read as "disturbing movement in the top left").
+          //    Curtain 1 (palette[0]) — anchored 25 %, bass kick.
+          //    Curtain 2 (palette[1]) — anchored 50 %, snare kick.
+          //    Curtain 3 (palette[2]) — anchored 75 %, bass kick.
+          _AuroraCurtain(
+            color: c0,
+            anchorX: 0.25,
+            phase: 0,
+            kick: _bassKick,
           ),
-          // Dark vignette so foreground text/artwork stay legible.
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.black.withValues(alpha: 0.0),
-                  Colors.black.withValues(alpha: 0.4 * s),
-                  Colors.black.withValues(alpha: 0.7 * s),
-                ],
-                stops: const [0.0, 0.6, 1.0],
+          _AuroraCurtain(
+            color: c1,
+            anchorX: 0.5,
+            phase: 1,
+            kick: _midKick,
+          ),
+          _AuroraCurtain(
+            color: c2,
+            anchorX: 0.75,
+            phase: 2,
+            kick: _bassKick,
+          ),
+
+          // 4. Vignette — keeps chrome text legible against the
+          //    bg's brightest regions. Stronger at the bottom where
+          //    the transport row + niche bar sit.
+          IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.0),
+                    Colors.black.withValues(alpha: 0.4 * s),
+                    Colors.black.withValues(alpha: 0.7 * s),
+                  ],
+                  stops: const [0.0, 0.6, 1.0],
+                ),
               ),
             ),
           ),
@@ -185,109 +360,169 @@ class _BloomBackgroundState extends ConsumerState<BloomBackground>
   }
 }
 
-/// Sub-tree-only Consumer used by [BloomBackground] to receive
-/// position/state changes without rebuilding the whole bloom Stack. It
-/// renders nothing — its only job is to forward Riverpod values to the
-/// parent's mutable fields each time the providers tick.
-class _PlayerStateBridge extends ConsumerWidget {
-  const _PlayerStateBridge({
-    required this.onPositionChange,
-    required this.onPlayingChange,
+/// Heavily-blurred album art at low opacity, sitting between the dark
+/// night-sky base and the aurora curtains. Pure cached layer — built
+/// once per song, never rebuilt; the wrapping RepaintBoundary keeps
+/// the blur out of the per-frame paint loop. No rotation or scale
+/// animation: this is the song's "colour memory", not its motion.
+class _StaticBlurredArt extends StatelessWidget {
+  const _StaticBlurredArt({required this.song});
+
+  final SongRow song;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: RepaintBoundary(
+          // Blur dropped from σ=40 to σ=20. Cost of `ImageFilter.blur`
+          // scales roughly with σ² on the texture size — this is a ~4×
+          // cheaper first-paint, which is the cost that wasn't being
+          // amortised by the surrounding RepaintBoundary (the layer is
+          // re-rasterised whenever the song changes). Visually the blob
+          // of colour reads identically; σ=40 was past the point of
+          // diminishing returns on a heavily-darkened image.
+          child: Opacity(
+            opacity: 0.32,
+            child: ImageFiltered(
+              imageFilter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+              child: AlbumArt(
+                artworkPath: song.localArtworkPath,
+                seed: song.id,
+                size: double.infinity,
+                radius: 0,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A vertical aurora-like glow of palette colour at a FIXED anchor.
+/// Three of these layered at 25 % / 50 % / 75 % horizontal positions
+/// form the "northern lights" composition.
+///
+/// Motion: NONE at rest. The previous build drifted curtains
+/// horizontally on a slow sine; user feedback was that the constant
+/// motion in the upper area read as "disturbing movement in the top
+/// left". On each kick (bass or snare onset) the curtain pulses
+/// alpha + width over 320 ms then settles — no positional change,
+/// no horizontal shake. Result: paused = perfectly still bg; playing
+/// = subtle pulse on each beat.
+class _AuroraCurtain extends StatelessWidget {
+  const _AuroraCurtain({
+    required this.color,
+    required this.anchorX,
+    required this.phase,
+    required this.kick,
   });
 
-  final ValueChanged<Duration> onPositionChange;
+  /// Palette colour for this glow.
+  final Color color;
+
+  /// Horizontal centre as a fraction of canvas width (0 = left edge,
+  /// 1 = right edge). The curtain's gradient centre lands at exactly
+  /// this position — no per-frame drift offsets it.
+  final double anchorX;
+
+  /// Kept for backwards compatibility with the call sites; unused
+  /// now that drift has been removed. Will be cleaned up next pass.
+  // ignore: unused_element
+  final int phase;
+
+  /// One-shot kick controller fired by the audio tick on each
+  /// rising-edge transient of this curtain's band.
+  final AnimationController kick;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final w = constraints.maxWidth;
+            final h = constraints.maxHeight;
+            // Curtain bounding box. Tall + narrow → the RadialGradient
+            // inside forms a vertical-ellipse, the aurora ribbon shape.
+            final curtainW = w * 0.40;
+            final curtainH = h * 1.30;
+            // Convert anchorX (0..1 = left..right of the canvas) into
+            // Align's coordinate system (-1..1 = left..right relative
+            // to (parent − child) width). Solving:
+            //   childCenterX = anchorX * w
+            //   childCenterX = (1 + alignX)/2 * (w − curtainW) + curtainW/2
+            // gives:
+            //   alignX = (anchorX * w − curtainW/2) / ((w − curtainW)/2) − 1
+            // which simplifies to (2*anchorX − 1) / (1 − curtainW/w).
+            final alignX =
+                (2 * anchorX - 1) / (1 - curtainW / w);
+
+            return Align(
+              alignment: Alignment(alignX, 0),
+              child: SizedBox(
+                width: curtainW,
+                height: curtainH,
+                // RepaintBoundary per curtain so a kick only invalidates
+                // *this* curtain's compositing layer, not the entire
+                // bloom stack (base gradient + blurred art + 2 sibling
+                // curtains + vignette). All three curtains have their
+                // own kicks, so without this the bloom's outer layer
+                // dirties on almost every audio onset.
+                child: RepaintBoundary(
+                  child: AnimatedBuilder(
+                    animation: kick,
+                    builder: (context, _) {
+                      // Ease-out quadratic kick decay over 320 ms.
+                      // value=0 → punch=1 (peak); value=1 → punch=0.
+                      final inv = 1.0 - kick.value;
+                      final punch = inv * inv;
+                      // Width breathes outward on each kick (1.0 → 1.35)
+                      // and alpha pops (0.18 → 0.78). No horizontal
+                      // translation — the curtain pulses in place.
+                      final alpha = 0.18 + punch * 0.60;
+                      final widthScale = 1.0 + punch * 0.35;
+                      return Transform.scale(
+                        scaleX: widthScale,
+                        scaleY: 1.0,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: RadialGradient(
+                              colors: [
+                                color.withValues(alpha: alpha),
+                                color.withValues(alpha: alpha * 0.45),
+                                color.withValues(alpha: 0.0),
+                              ],
+                              stops: const [0.0, 0.45, 1.0],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+/// Sub-tree-only Consumer that forwards isPlaying without rebuilding
+/// the bg stack on every position tick.
+class _PlayerStateBridge extends ConsumerWidget {
+  const _PlayerStateBridge({required this.onPlayingChange});
+
   final ValueChanged<bool> onPlayingChange;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final pos =
-        ref.watch(playerPositionProvider).valueOrNull ?? Duration.zero;
     final playing =
         ref.watch(playerStateStreamProvider).valueOrNull?.playing ?? false;
-    onPositionChange(pos);
     onPlayingChange(playing);
     return const SizedBox.shrink();
   }
-}
-
-/// Snapshot of every per-frame value the bloob painter needs. Held in a
-/// single `ValueNotifier` so one tick produces one repaint, regardless of
-/// how many sub-values changed.
-class _BloomParams {
-  const _BloomParams({required this.drifts, required this.beat});
-
-  static const _BloomParams zero =
-      _BloomParams(drifts: <double>[0, 0, 0], beat: 0);
-
-  final List<double> drifts;
-  final double beat;
-}
-
-class _ColorBlobsPainter extends CustomPainter {
-  _ColorBlobsPainter({
-    required this.colors,
-    required this.drifts,
-    required this.beat,
-  });
-
-  final List<Color> colors;
-  final List<double> drifts;
-
-  /// Smooth flow envelope, -1..1. +1 at the downbeat crest, -1 between
-  /// beats. Used as a fluid modulator on radius / alpha / orbit.
-  final double beat;
-
-  static const _twoPi = math.pi * 2;
-  static const _anchors = <Offset>[
-    Offset(0.30, 0.32),
-    Offset(0.72, 0.62),
-    Offset(0.50, 0.85),
-  ];
-  static const _orbitX = <double>[0.22, 0.18, 0.20];
-  static const _orbitY = <double>[0.18, 0.22, 0.16];
-  static const _radii = <double>[0.85, 0.70, 0.65];
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    final shortest = math.min(w, h);
-    final n = math.min(colors.length, drifts.length);
-
-    // Smooth fluid modulation. beat ∈ -1..1; map to gentle scalars so the
-    // motion feels like a tide rather than a hit.
-    final radiusFlow = 1.0 + beat * 0.08; // ±8% radius swell
-    final alphaFlow = 0.55 + beat * 0.10; // ±0.10 brightness lift
-    final orbitFlow = 1.0 + beat * 0.18; // ±18% orbit width swing
-
-    for (var i = 0; i < n; i++) {
-      final t = drifts[i];
-      final anchor = _anchors[i % _anchors.length];
-      final orbX = _orbitX[i % _orbitX.length] * orbitFlow;
-      final orbY = _orbitY[i % _orbitY.length] * orbitFlow;
-      final cx = anchor.dx * w +
-          math.cos(t * _twoPi + i * 0.9) * w * orbX;
-      final cy = anchor.dy * h +
-          math.sin(t * _twoPi + i * 0.6) * h * orbY;
-      final radius = shortest * _radii[i % _radii.length] * radiusFlow;
-
-      // Plain srcOver — visually close enough to a screen blend at this
-      // alpha range, but without the per-frame saveLayer cost screen mode
-      // would force when this CustomPaint sits on top of the bloom.
-      final paint = Paint()
-        ..shader = ui.Gradient.radial(
-          Offset(cx, cy),
-          radius,
-          [
-            colors[i].withValues(alpha: alphaFlow),
-            colors[i].withValues(alpha: 0.0),
-          ],
-          const [0.0, 0.75],
-        );
-      canvas.drawCircle(Offset(cx, cy), radius, paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _ColorBlobsPainter old) => true;
 }

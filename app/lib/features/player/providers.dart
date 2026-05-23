@@ -1,5 +1,4 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:just_audio/just_audio.dart';
 
 import '../../core/services/audio_handler.dart';
 import '../../main.dart' show globalPlayerService, globalAudioHandler;
@@ -11,7 +10,7 @@ import 'player_service.dart';
 final playerServiceProvider = Provider<PlayerService>((ref) {
   final existing = globalPlayerService;
   if (existing != null) return existing;
-  final fallback = PlayerService(AudioPlayer(), AudioPlayer());
+  final fallback = PlayerService();
   ref.onDispose(fallback.dispose);
   return fallback;
 });
@@ -23,7 +22,7 @@ final audioHandlerProvider = Provider<AppAudioHandler?>((ref) {
   return globalAudioHandler;
 });
 
-final playerStateStreamProvider = StreamProvider<PlayerState>((ref) {
+final playerStateStreamProvider = StreamProvider<PlayerSnapshot>((ref) {
   return ref.watch(playerServiceProvider).playerStateStream;
 });
 

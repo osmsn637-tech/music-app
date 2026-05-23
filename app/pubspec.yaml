@@ -36,12 +36,17 @@ dependencies:
   flutter_riverpod: ^2.6.1
 
   # Audio playback
-  just_audio: ^0.9.42
-  # audio_service replaces just_audio_background. just_audio_background only
-  # supported one AudioPlayer per process, which broke our two-deck crossfade.
-  # We now own the AudioHandler ourselves and route lockscreen commands to
-  # the AI DJ controller (skipToNext = skip-as-negative-signal).
+  # flutter_soloud replaces just_audio so we can read live FFT directly
+  # off the audio mix (drives the bass-reactive fluid background) and
+  # mix multiple sources for the AI-DJ crossfade without juggling two
+  # AudioPlayer instances.
+  flutter_soloud: ^3.1.10
+  # audio_service still owns the lockscreen / Bluetooth / media-button
+  # bridge. The handler proxies its callbacks to our PlayerService
+  # (which now wraps SoLoud).
   audio_service: ^0.18.13
+  # iOS audio category + interruption handling. Required now that
+  # just_audio_background is no longer doing it implicitly.
   audio_session: ^0.1.21
   rxdart: ^0.27.7
 
@@ -67,6 +72,13 @@ dependencies:
   share_plus: ^10.0.0
   # Save lyric card to the device's Photos / Gallery.
   gal: ^2.3.0
+
+  # Native file + folder picker for "Import from device" in Settings.
+  file_picker: ^8.1.4
+
+  # Material container-transform for the player's Lyrics button →
+  # full lyrics page morph (and reverse on back).
+  animations: ^2.0.11
 
 dev_dependencies:
   flutter_test:
@@ -111,6 +123,7 @@ flutter:
   assets:
     - assets/dj_voice_bank/
     - assets/quick_pick_bg/
+    - assets/icon/flacko_logo.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

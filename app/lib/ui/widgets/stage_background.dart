@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../features/player/player_expansion_controller.dart';
 import '../theme/app_theme.dart';
 
 /// The pitch-black stage with two huge drifting radial-gradient blobs that
@@ -23,10 +24,49 @@ class _StageBackgroundState extends State<StageBackground>
       AnimationController(vsync: this, duration: const Duration(seconds: 34))
         ..repeat(reverse: true);
 
+  // When the full player is up or another route covers the home shell,
+  // this background is invisible, so we can stop the drift loops.
+  PlayerExpansionController? _expansion;
+  ModalRoute<Object?>? _route;
+  bool _covered = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final exp = PlayerExpansionScope.read(context);
+    if (!identical(exp, _expansion)) {
+      _expansion?.removeListener(_recomputeCovered);
+      _expansion = exp;
+      _expansion!.addListener(_recomputeCovered);
+    }
+    final route = ModalRoute.of(context);
+    if (!identical(route, _route)) {
+      _route?.secondaryAnimation?.removeListener(_recomputeCovered);
+      _route = route;
+      _route?.secondaryAnimation?.addListener(_recomputeCovered);
+    }
+    _recomputeCovered();
+  }
+
+  void _recomputeCovered() {
+    final byPlayer = (_expansion?.value ?? 0) >= 0.97;
+    final byRoute = (_route?.secondaryAnimation?.value ?? 0) >= 0.97;
+    final next = byPlayer || byRoute;
+    if (next == _covered) return;
+    _covered = next;
+    if (next) {
+      _drift1.stop();
+      _drift2.stop();
+    } else if (widget.animated) {
+      if (!_drift1.isAnimating) _drift1.repeat(reverse: true);
+      if (!_drift2.isAnimating) _drift2.repeat(reverse: true);
+    }
+  }
+
   @override
   void didUpdateWidget(covariant StageBackground oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.animated && !_drift1.isAnimating) {
+    if (widget.animated && !_drift1.isAnimating && !_covered) {
       _drift1.repeat(reverse: true);
       _drift2.repeat(reverse: true);
     } else if (!widget.animated && _drift1.isAnimating) {
@@ -37,6 +77,8 @@ class _StageBackgroundState extends State<StageBackground>
 
   @override
   void dispose() {
+    _expansion?.removeListener(_recomputeCovered);
+    _route?.secondaryAnimation?.removeListener(_recomputeCovered);
     _drift1.dispose();
     _drift2.dispose();
     super.dispose();

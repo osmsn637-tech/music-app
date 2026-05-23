@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:just_audio/just_audio.dart' as ja;
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/services/audio_handler.dart';
@@ -35,7 +34,7 @@ class NowPlayingController extends StateNotifier<SongRow?> {
   List<SongRow> _queue = const [];
   int _queueIndex = -1;
   bool _autoAdvancing = false;
-  StreamSubscription<ja.PlayerState>? _stateSub;
+  StreamSubscription<PlayerSnapshot>? _stateSub;
 
   bool _notificationPermissionRequested = false;
 
@@ -120,8 +119,8 @@ class NowPlayingController extends StateNotifier<SongRow?> {
     await _repo.stampPlayed(song.id);
   }
 
-  void _onPlayerState(ja.PlayerState ps) {
-    if (ps.processingState != ja.ProcessingState.completed) return;
+  void _onPlayerState(PlayerSnapshot ps) {
+    if (ps.processingState != PlayerProcessingState.completed) return;
     if (_queue.isEmpty) return; // No queue → nothing to advance to.
     if (_autoAdvancing) return;
     _autoAdvancing = true;

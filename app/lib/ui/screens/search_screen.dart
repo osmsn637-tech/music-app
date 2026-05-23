@@ -9,7 +9,7 @@ import '../../features/search/search_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/album_art.dart';
 import '../widgets/glass.dart';
-import '../widgets/mini_player.dart' show openPlayerRoute;
+import '../../features/player/player_expansion_controller.dart';
 import '../widgets/song_actions.dart';
 import '../widgets/song_tile.dart';
 
@@ -53,7 +53,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       return;
     }
     if (!mounted) return;
-    Navigator.of(context).push(openPlayerRoute());
+    PlayerExpansionScope.read(context).expand();
   }
 
   @override

@@ -77,8 +77,11 @@ class LumenTokens {
       Theme.of(c).brightness == Brightness.dark ? Colors.black : Colors.white;
 
   // ─── Radii ────────────────────────────────────────────────────────────
+  // Matches Lumen Design System tokens. rXl = glass-card corner (28),
+  // rLg = album art (18), distinct from the mini-player surface which
+  // stays at 22 because that's a different surface in the design.
   static const rPill = 999.0;
-  static const rXl = 22.0;
+  static const rXl = 28.0;
   static const rLg = 18.0;
   static const rMd = 16.0;
   static const rSm = 14.0;

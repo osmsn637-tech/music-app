@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/services/providers.dart';
 import '../../features/player/now_playing_controller.dart';
+import '../../features/player/player_expansion_controller.dart';
+import '../widgets/expanding_player.dart';
 import '../widgets/glass_tab_bar.dart';
-import '../widgets/live_wallpaper.dart';
-import '../widgets/mini_player.dart';
 import '../widgets/profile_sheet.dart';
 import '../widgets/stage_background.dart';
 import 'ai_dj_screen.dart';
@@ -14,6 +13,11 @@ import 'home_screen.dart';
 import 'home_shell_providers.dart';
 import 'library_screen.dart';
 import 'search_screen.dart';
+
+/// Tab-bar visual height (excluding the bottom safe-area inset). Matches
+/// the GlassTabBar's intrinsic height — kept here as a constant because
+/// the ExpandingPlayer needs to know it to compute the mini rect's top.
+const double kHomeShellTabBarHeight = 66;
 
 class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
@@ -59,7 +63,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final hasNowPlaying = ref.watch(nowPlayingProvider) != null;
     final index = ref.watch(homeTabIndexProvider);
     final navVisible = ref.watch(navVisibleProvider);
-    final liveWallpaper = ref.watch(liveWallpaperProvider);
 
     final scaffold = Scaffold(
         backgroundColor: Colors.transparent,
@@ -79,14 +82,16 @@ class _HomeShellState extends ConsumerState<HomeShell> {
             // vertical drags — vertical scrolling inside any tab is
             // unblocked across the full body.
             Positioned.fill(
-              child: Material(
-                type: MaterialType.transparency,
-                child: NotificationListener<ScrollNotification>(
-                  onNotification: (n) =>
-                      _handleScroll(ref, n, navVisible: navVisible),
-                  child: IndexedStack(
-                    index: index,
-                    children: _pages,
+              child: _OffstageWhenPlayerCovered(
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: NotificationListener<ScrollNotification>(
+                    onNotification: (n) =>
+                        _handleScroll(ref, n, navVisible: navVisible),
+                    child: IndexedStack(
+                      index: index,
+                      children: _pages,
+                    ),
                   ),
                 ),
               ),
@@ -106,47 +111,55 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                 ),
               ),
             ),
-            // Floating mini-player + glass tab bar. The mini-player is
-            // always visible while a song is loaded — only the tab bar
-            // collapses out on downward scroll, and the mini-player rides
-            // the closing gap down to the bottom edge.
+            // Sticky tab bar — always visible regardless of scroll
+            // direction. The expanding player overlays on top of it
+            // when the user opens the player, so the tab bar can
+            // safely stay anchored here.
             Positioned(
               left: 0,
               right: 0,
-              bottom: MediaQuery.of(context).padding.bottom,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (hasNowPlaying) const MiniPlayer(),
-                  AnimatedSize(
-                    duration: const Duration(milliseconds: 260),
-                    curve: Curves.easeOutCubic,
-                    alignment: Alignment.topCenter,
-                    child: AnimatedOpacity(
-                      duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeOut,
-                      opacity: navVisible ? 1 : 0,
-                      child: navVisible
-                          ? GlassTabBar(
-                              tabs: HomeShell._tabs,
-                              activeIndex: index,
-                              onChanged: (i) => ref
-                                  .read(homeTabIndexProvider.notifier)
-                                  .state = i,
-                            )
-                          : const SizedBox(width: double.infinity, height: 0),
-                    ),
-                  ),
-                ],
+              bottom: 0,
+              child: GlassTabBar(
+                tabs: HomeShell._tabs,
+                activeIndex: index,
+                onChanged: (i) =>
+                    ref.read(homeTabIndexProvider.notifier).state = i,
               ),
             ),
+            // Unified mini/full player. Sits on top of everything in
+            // the home shell so the full-form fully covers the tab
+            // bar at e=1, while the mini-form (e=0) floats just above
+            // the tab bar. Owns its own gesture handling for
+            // tap-to-expand and drag-to-collapse.
+            if (hasNowPlaying)
+              Positioned.fill(
+                child: ExpandingPlayer(
+                  tabBarHeight: kHomeShellTabBarHeight,
+                ),
+              ),
           ],
         ),
       );
 
-    return liveWallpaper
-        ? LiveWallpaperBackground(child: scaffold)
-        : StageBackground(child: scaffold);
+    final shell = StageBackground(child: scaffold);
+
+    // Hosts the AnimationController behind PlayerExpansionScope.of(...) /
+    // .read(...) calls from the entire subtree. Wrapping at this level
+    // means every tab (Home, Search, Library, Playlist detail, AI DJ)
+    // can call `.expand()` to open the player without pushing a route.
+    //
+    // _ShellBackHandler sits inside the scope so it can subscribe to the
+    // expansion controller and provide a fully reactive PopScope — one
+    // that updates canPop both when Riverpod providers change (tab index)
+    // AND when the animation crosses the expanded/mini threshold.
+    return PlayerExpansionScope(
+      child: _ShellBackHandler(
+        tabIndex: index,
+        onGoHome: () =>
+            ref.read(homeTabIndexProvider.notifier).state = 0,
+        child: shell,
+      ),
+    );
   }
 
   bool _handleScroll(
@@ -196,6 +209,144 @@ class _ProfileButton extends StatelessWidget {
           child: const Icon(Icons.person_rounded, size: 20),
         ),
       ),
+    );
+  }
+}
+
+/// Wraps its [child] in an [Offstage] that flips on whenever the
+/// player's expansion controller is at e ≥ 0.97 — i.e. the player is
+/// fully covering the screen. The covered subtree (home content + the
+/// static StageBackground layer) keeps its widget state but stops
+/// painting and stops accepting pointer events, so the GPU and CPU
+/// don't waste cycles on a screen the user can't see.
+///
+/// Listens directly to the controller (one cheap listener), flips the
+/// [_covered] bool via setState only when the threshold is crossed —
+/// 2 rebuilds per full expand/collapse, not 60 per second.
+class _OffstageWhenPlayerCovered extends StatefulWidget {
+  const _OffstageWhenPlayerCovered({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_OffstageWhenPlayerCovered> createState() =>
+      _OffstageWhenPlayerCoveredState();
+}
+
+class _OffstageWhenPlayerCoveredState
+    extends State<_OffstageWhenPlayerCovered> {
+  PlayerExpansionController? _expansion;
+  bool _covered = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final exp = PlayerExpansionScope.read(context);
+    if (!identical(exp, _expansion)) {
+      _expansion?.removeListener(_onExpansionChanged);
+      _expansion = exp;
+      _expansion!.addListener(_onExpansionChanged);
+      _onExpansionChanged();
+    }
+  }
+
+  void _onExpansionChanged() {
+    final next = (_expansion?.value ?? 0) >= 0.97;
+    if (next == _covered) return;
+    setState(() => _covered = next);
+  }
+
+  @override
+  void dispose() {
+    _expansion?.removeListener(_onExpansionChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Offstage(offstage: _covered, child: widget.child);
+  }
+}
+
+/// Handles the system back button for the home shell by wrapping its
+/// [child] in a [PopScope].
+///
+/// Two cases are intercepted (in priority order):
+///  1. **Player expanded** — back collapses the player; stays on the
+///     current tab.
+///  2. **Non-home tab active** — back navigates to tab 0 (Home).
+///
+/// When on the Home tab with the player mini or absent the pop is
+/// allowed through so the app can exit normally.
+///
+/// Subscribes to [PlayerExpansionController] directly (same pattern as
+/// [_OffstageWhenPlayerCovered]) so [canPop] updates at the expand/
+/// collapse threshold rather than waiting for a Riverpod rebuild.
+class _ShellBackHandler extends StatefulWidget {
+  const _ShellBackHandler({
+    required this.tabIndex,
+    required this.onGoHome,
+    required this.child,
+  });
+
+  final int tabIndex;
+  final VoidCallback onGoHome;
+  final Widget child;
+
+  @override
+  State<_ShellBackHandler> createState() => _ShellBackHandlerState();
+}
+
+class _ShellBackHandlerState extends State<_ShellBackHandler> {
+  PlayerExpansionController? _expansion;
+
+  /// True when expansion value ≥ 0.05 — the same threshold used
+  /// previously in the ExpandingPlayer's PopScope.
+  bool _playerExpanded = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final exp = PlayerExpansionScope.read(context);
+    if (!identical(exp, _expansion)) {
+      _expansion?.removeListener(_onExpansionChanged);
+      _expansion = exp;
+      _expansion!.addListener(_onExpansionChanged);
+      _onExpansionChanged();
+    }
+  }
+
+  void _onExpansionChanged() {
+    final next = (_expansion?.value ?? 0) >= 0.05;
+    if (next == _playerExpanded) return;
+    setState(() => _playerExpanded = next);
+  }
+
+  @override
+  void dispose() {
+    _expansion?.removeListener(_onExpansionChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final onHomeTab = widget.tabIndex == 0;
+    return PopScope(
+      // Allow the app to exit only when the player is mini/absent AND
+      // the Home tab is already active — every other state intercepts
+      // back to do the right thing first.
+      canPop: onHomeTab && !_playerExpanded,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (_playerExpanded) {
+          // Priority 1: collapse the full-screen player.
+          _expansion?.collapse();
+        } else if (!onHomeTab) {
+          // Priority 2: return to the Home tab.
+          widget.onGoHome();
+        }
+      },
+      child: widget.child,
     );
   }
 }
