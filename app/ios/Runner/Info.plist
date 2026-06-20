@@ -77,5 +77,7 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>This app downloads your music from a music server on your local Wi-Fi network.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Flacko saves your lyric cards to your photo library.</string>
 </dict>
 </plist>

@@ -26,7 +26,9 @@ class AppAudioHandler extends BaseAudioHandler with SeekHandler {
     _stateSub = _service.playerStateStream.listen(_onPlayerState);
     _posSub = _service.positionStream.listen(_onPosition);
     _durSub = _service.durationStream.listen(_onDuration);
-    _emit();
+    // No initial _emit(): an idle PlaybackState here makes audio_service
+    // call _stop(), which nils MPNowPlayingInfoCenter and tears down the
+    // command center. Let the first real (playing) snapshot populate it.
   }
 
   final PlayerService _service;

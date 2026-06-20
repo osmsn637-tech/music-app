@@ -34,6 +34,24 @@ class PlayerSnapshot {
   }
 }
 
+/// Both decks' live refs handed to the AutoMix executor for the duration of
+/// a transition: the outgoing track (already playing) and the incoming
+/// track (preloaded silent on the idle deck). The executor drives each
+/// handle's volume and attaches filters to each source independently.
+class AutoMixDecks {
+  const AutoMixDecks({
+    required this.outgoingHandle,
+    required this.outgoingSource,
+    required this.incomingHandle,
+    required this.incomingSource,
+  });
+
+  final SoundHandle outgoingHandle;
+  final AudioSource outgoingSource;
+  final SoundHandle incomingHandle;
+  final AudioSource incomingSource;
+}
+
 /// Two-source audio engine on top of `flutter_soloud`. Mirrors the shape
 /// of the previous `just_audio`-backed PlayerService — one "active" deck
 /// drives UI streams, an "idle" deck preloads for crossfades — but uses
@@ -72,6 +90,8 @@ class PlayerService {
 
   bool _aActive = true;
   bool _sessionConfigured = false;
+  bool _pausedByInterruption = false;
+  double _speed = 1.0;
 
   SoundHandle? get _activeHandle => _aActive ? _handleA : _handleB;
   AudioSource? get _activeSource => _aActive ? _sourceA : _sourceB;
@@ -125,15 +145,152 @@ class PlayerService {
 
   Timer? _fadeTimer;
 
+  // --- AutoMix engine hooks ---------------------------------------------
+  // The AutoMix executor (features/automix/runtime) needs lower-level
+  // access than the simple crossfade above: both decks' handles+sources at
+  // once (to drive independent gain/EQ/pitch curves), the live engine to
+  // attach per-source filters, and an explicit begin/commit so it — not
+  // PlayerService — owns the volume automation for the duration of a mix.
+
+  /// The underlying SoLoud engine (for attaching per-source filters).
+  SoLoud get soloud => _soloud;
+
+  /// Current playhead of the active deck, or null if nothing is loaded.
+  Duration? get activePosition {
+    final h = _activeHandle;
+    if (h == null) return null;
+    try {
+      if (!_soloud.getIsValidVoiceHandle(h)) return null;
+      return _soloud.getPosition(h);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Begin an AutoMix: the currently-playing track becomes the *outgoing*
+  /// deck; [incomingPath] is loaded silent on the idle deck and seeked to
+  /// [incomingStartSec]. Activeness flips to the incoming track immediately
+  /// (so now-playing UI follows the new song) while the outgoing keeps
+  /// playing under the executor's control until [commitAutoMix]. Returns
+  /// both decks' refs, or null if there's nothing playing to mix out of.
+  Future<AutoMixDecks?> beginAutoMix(
+    String incomingPath, {
+    required double incomingStartSec,
+  }) async {
+    final outHandle = _activeHandle;
+    final outSource = _activeSource;
+    if (outHandle == null || outSource == null) return null;
+    if (!await File(incomingPath).exists()) {
+      throw StateError('AutoMix incoming file missing: $incomingPath');
+    }
+    await _ensureSession();
+    _fadeTimer?.cancel();
+
+    // Load the incoming track on the idle deck, playing but silent.
+    await _loadAndPlay(incomingPath, onActive: false, volume: 0.0);
+    final inHandle = _aActive ? _handleB : _handleA;
+    final inSource = _aActive ? _sourceB : _sourceA;
+    final inDuration = _aActive ? _durationB : _durationA;
+    if (inHandle == null || inSource == null) return null;
+
+    if (incomingStartSec > 0) {
+      try {
+        _soloud.seek(inHandle, _secToDuration(incomingStartSec));
+      } catch (_) {}
+    }
+
+    // Flip activeness → the incoming track now drives the outward streams.
+    _aActive = !_aActive;
+    _startPositionPolling();
+    _durCtrl.add(inDuration);
+    _emitState(
+      const PlayerSnapshot(
+        playing: true,
+        processingState: PlayerProcessingState.ready,
+      ),
+    );
+
+    return AutoMixDecks(
+      outgoingHandle: outHandle,
+      outgoingSource: outSource,
+      incomingHandle: inHandle,
+      incomingSource: inSource,
+    );
+  }
+
+  /// Finish an AutoMix: the outgoing track (now on the idle deck after the
+  /// activeness flip in [beginAutoMix]) is stopped + unloaded, leaving only
+  /// the incoming track playing.
+  Future<void> commitAutoMix() async {
+    await _unloadIdleSource();
+  }
+
+  /// Abort an in-progress AutoMix before commit: drop the incoming idle deck
+  /// and restore the outgoing as active. Best-effort.
+  Future<void> abortAutoMix(AutoMixDecks decks) async {
+    try {
+      _soloud.setVolume(decks.outgoingHandle, 1.0);
+    } catch (_) {}
+    _aActive = !_aActive; // restore: outgoing active again
+    await _unloadIdleSource(); // drop the incoming deck
+    _startPositionPolling();
+  }
+
+  Duration _secToDuration(double sec) =>
+      Duration(microseconds: (sec * 1e6).round());
+
   Future<void> _ensureSession() async {
-    if (_sessionConfigured) return;
     try {
       final session = await AudioSession.instance;
-      await session.configure(const AudioSessionConfiguration.music());
-      _sessionConfigured = true;
+      if (!_sessionConfigured) {
+        await session.configure(const AudioSessionConfiguration.music());
+        _sessionConfigured = true;
+        _wireSessionEvents(session);
+      }
+      final active = await session.setActive(true);
+      if (!active) {
+        debugPrint('[player] AudioSession activation denied');
+      }
     } catch (e) {
       debugPrint('[player] AudioSession configure failed: $e');
     }
+  }
+
+  /// Handle phone calls / Siri / other apps grabbing audio focus, and
+  /// headphones being unplugged. On a transient interruption we pause
+  /// (or duck) and auto-resume when it ends; unplugging just pauses.
+  void _wireSessionEvents(AudioSession session) {
+    session.interruptionEventStream.listen((event) {
+      if (event.begin) {
+        switch (event.type) {
+          case AudioInterruptionType.duck:
+            duckOutgoing(0.3);
+          case AudioInterruptionType.pause:
+          case AudioInterruptionType.unknown:
+            if (_state.playing) {
+              _pausedByInterruption = true;
+              pause();
+            }
+        }
+      } else {
+        switch (event.type) {
+          case AudioInterruptionType.duck:
+            duckOutgoing(1.0);
+          case AudioInterruptionType.pause:
+            if (_pausedByInterruption) {
+              _pausedByInterruption = false;
+              resume();
+            }
+          case AudioInterruptionType.unknown:
+            _pausedByInterruption = false;
+        }
+      }
+    });
+    // Headphones unplugged / output route lost → pause (never blast music
+    // out the phone speaker).
+    session.becomingNoisyEventStream.listen((_) {
+      if (_state.playing) pause();
+    });
   }
 
   /// Play [song]. With [crossfade] = 0, hard-cuts: stop everything, load
@@ -181,10 +338,12 @@ class PlayerService {
       final loaded = await _loadAndPlay(file.path, onActive: true, volume: 1.0);
       _startPositionPolling();
       _durCtrl.add(loaded);
-      _emitState(const PlayerSnapshot(
-        playing: true,
-        processingState: PlayerProcessingState.ready,
-      ));
+      _emitState(
+        const PlayerSnapshot(
+          playing: true,
+          processingState: PlayerProcessingState.ready,
+        ),
+      );
       return;
     }
 
@@ -200,10 +359,12 @@ class PlayerService {
     _aActive = !_aActive; // incoming is now "active"
     _startPositionPolling();
     _durCtrl.add(loaded);
-    _emitState(const PlayerSnapshot(
-      playing: true,
-      processingState: PlayerProcessingState.ready,
-    ));
+    _emitState(
+      const PlayerSnapshot(
+        playing: true,
+        processingState: PlayerProcessingState.ready,
+      ),
+    );
 
     const stepMs = 50;
     final totalMs = crossfade.inMilliseconds;
@@ -257,6 +418,7 @@ class PlayerService {
   }
 
   Future<void> resume() async {
+    await _ensureSession();
     final h = _activeHandle;
     if (h == null) return;
     _soloud.setPause(h, false);
@@ -274,17 +436,74 @@ class PlayerService {
     _fadeTimer?.cancel();
     _stopPositionPolling();
     await _stopAndUnloadAll();
-    _emitState(const PlayerSnapshot(
-      playing: false,
-      processingState: PlayerProcessingState.idle,
-    ));
+    _emitState(
+      const PlayerSnapshot(
+        playing: false,
+        processingState: PlayerProcessingState.idle,
+      ),
+    );
   }
 
   Future<void> seek(Duration position) async {
+    await _ensureSession();
     final h = _activeHandle;
     if (h == null) return;
+    final wasPlaying = _state.playing;
     _soloud.seek(h, position);
+    if (wasPlaying) {
+      _soloud.setPause(h, false);
+    }
     _posCtrl.add(position);
+    _emitState(_state.copyWith(playing: wasPlaying));
+  }
+
+  /// Load [song] onto the active deck but stay PAUSED at [at]. Used to
+  /// restore the previous session on launch without auto-playing. Loads
+  /// silent → pauses → seeks → restores volume so there's no audible
+  /// blip before the pause lands.
+  Future<void> prepare(SongRow song, {Duration at = Duration.zero}) async {
+    if (!audioBackgroundReady) {
+      throw StateError('Audio engine not initialised');
+    }
+    await _ensureSession();
+    final file = File(song.localFilePath);
+    if (!await file.exists()) {
+      throw StateError('Song file missing: ${song.localFilePath}');
+    }
+    _emitState(_state.copyWith(processingState: PlayerProcessingState.loading));
+    _fadeTimer?.cancel();
+    await _stopAndUnloadAll();
+    final loaded = await _loadAndPlay(file.path, onActive: true, volume: 0.0);
+    final h = _activeHandle;
+    if (h != null) {
+      try {
+        _soloud.setPause(h, true);
+        if (at > Duration.zero) _soloud.seek(h, at);
+        _soloud.setVolume(h, 1.0);
+      } catch (_) {}
+    }
+    _startPositionPolling();
+    _durCtrl.add(loaded);
+    _posCtrl.add(at);
+    _emitState(
+      const PlayerSnapshot(
+        playing: false,
+        processingState: PlayerProcessingState.ready,
+      ),
+    );
+  }
+
+  /// Playback speed (1.0 = normal). Applies to the active deck now and to
+  /// every subsequently loaded track.
+  double get speed => _speed;
+  void setSpeed(double speed) {
+    _speed = speed.clamp(0.25, 3.0);
+    final h = _activeHandle;
+    if (h != null) {
+      try {
+        _soloud.setRelativePlaySpeed(h, _speed);
+      } catch (_) {}
+    }
   }
 
   // --- Helpers ---------------------------------------------------------
@@ -297,6 +516,12 @@ class PlayerService {
     final source = await _soloud.loadFile(path);
     final duration = _soloud.getLength(source);
     final handle = await _soloud.play(source, volume: volume);
+    // Carry the chosen playback speed onto each new track.
+    if (_speed != 1.0) {
+      try {
+        _soloud.setRelativePlaySpeed(handle, _speed);
+      } catch (_) {}
+    }
 
     final finishedSub = source.allInstancesFinished.listen((_) {
       // Only flip to completed if THIS handle was still the active one
@@ -306,10 +531,12 @@ class PlayerService {
           ? (onActive ? handle == _handleA : handle == _handleB)
           : false;
       if (stillActive) {
-        _emitState(_state.copyWith(
-          playing: false,
-          processingState: PlayerProcessingState.completed,
-        ));
+        _emitState(
+          _state.copyWith(
+            playing: false,
+            processingState: PlayerProcessingState.completed,
+          ),
+        );
       }
     });
 

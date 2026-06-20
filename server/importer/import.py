@@ -44,6 +44,28 @@ def stable_id(stem: str) -> str:
     return f"imp_{safe or 'song'}"
 
 
+def normalize_artist_id(name: str) -> str:
+    """Mirror of the Dart `normalizeArtistId` so the manifest's artist ids
+    match both the filenames in content/artists/ and the id the app derives
+    from a song's `artist` field at lookup time."""
+    s = re.sub(r"[^a-zA-Z0-9]+", "_", name)
+    s = re.sub(r"^_+|_+$", "", s).lower()
+    return s or "unknown"
+
+
+_ARTIST_SPLIT = re.compile(
+    r"\s*(?:,|&|/|feat\.?|ft\.?|featuring|with|\bx\b)\s*", re.IGNORECASE
+)
+
+
+def split_multi_artist(field):
+    """Split "Drake, 21 Savage" / "X & Y" / "X feat. Y" into individual names
+    (used only to give each artist photo a nicely-cased display name)."""
+    if not field or not field.strip():
+        return []
+    return [p.strip() for p in _ARTIST_SPLIT.split(field) if p.strip()]
+
+
 def read_metadata(path: Path) -> dict:
     """Returns title/artist/album/genre/durationMs/bpm + artwork bytes if any."""
     out: dict = {}
@@ -278,12 +300,41 @@ def regenerate_manifest(content: Path, base_url: str | None) -> None:
 
         songs.append(entry)
 
-    manifest = {"version": 1, "songs": songs}
+    # Display-name map (id -> nicely-cased name) from the song artists, so the
+    # artists[] entries below carry real names instead of slug-cased ones.
+    name_by_id: dict[str, str] = {}
+    for entry in songs:
+        for part in split_multi_artist(entry.get("artist")):
+            name_by_id.setdefault(normalize_artist_id(part), part)
+
+    # Emit an artists[] section for EVERY profile picture on disk so the app's
+    # sync downloads them (id = filename stem = normalizeArtistId(name), which
+    # the app derives from each song's artist at lookup time). Without this the
+    # photos sit on the server unreferenced and the app shows gradients.
+    artists_dir = content / "artists"
+    artists = []
+    if artists_dir.is_dir():
+        for img in sorted(artists_dir.iterdir()):
+            if img.suffix.lower() not in SUPPORTED_ART_EXTS:
+                continue
+            aid = img.stem
+            artists.append(
+                {
+                    "id": aid,
+                    "name": name_by_id.get(aid, aid.replace("_", " ").title()),
+                    "imageUrl": f"{base}/artists/{img.name}",
+                }
+            )
+
+    manifest = {"version": 1, "songs": songs, "artists": artists}
     manifest_path.write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-    print(f"manifest: wrote {manifest_path} with {len(songs)} song(s).")
+    print(
+        f"manifest: wrote {manifest_path} with {len(songs)} song(s) "
+        f"and {len(artists)} artist(s)."
+    )
 
 
 def main() -> int:

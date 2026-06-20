@@ -4,8 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/services/providers.dart';
 import '../../data/database/providers.dart';
 import '../../features/ai_dj/dj_mode.dart';
+import '../../features/connect/connect_models.dart';
+import '../../features/connect/providers.dart';
 import '../../features/library/storage_info.dart';
 import '../../features/sync/providers.dart';
+import '../theme/app_theme.dart';
+import '../widgets/glass_kit.dart';
 
 final _storageInfoProvider = FutureProvider.autoDispose<StorageInfo>((ref) {
   return StorageInspector().compute();
@@ -20,12 +24,19 @@ class SettingsScreen extends ConsumerStatefulWidget {
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _urlController = TextEditingController();
+  final _connectUrlController = TextEditingController();
+  final _roomController = TextEditingController();
+  final _nameController = TextEditingController();
   bool _initialized = false;
   bool _saved = false;
+  bool _connectSaved = false;
 
   @override
   void dispose() {
     _urlController.dispose();
+    _connectUrlController.dispose();
+    _roomController.dispose();
+    _nameController.dispose();
     super.dispose();
   }
 
@@ -35,7 +46,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (url != null && _urlController.text.isEmpty) {
       _urlController.text = url;
     }
+    final settings = await ref.read(settingsServiceProvider.future);
+    if (_connectUrlController.text.isEmpty) {
+      _connectUrlController.text = settings.connectUrl ?? '';
+    }
+    if (_roomController.text.isEmpty) {
+      _roomController.text = settings.roomCode ?? '';
+    }
+    if (_nameController.text.isEmpty) {
+      _nameController.text = settings.deviceName;
+    }
     _initialized = true;
+  }
+
+  Future<void> _saveConnect() async {
+    final settings = await ref.read(settingsServiceProvider.future);
+    await settings.setDeviceName(_nameController.text);
+    await settings.setRoomCode(_roomController.text);
+    await settings.setConnectUrl(_connectUrlController.text);
+    await ref.read(connectServiceProvider.notifier).applySettings();
+    if (!mounted) return;
+    setState(() => _connectSaved = true);
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Live Connect saved')));
   }
 
   Future<void> _saveUrl() async {
@@ -44,42 +78,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     ref.invalidate(serverUrlProvider);
     if (!mounted) return;
     setState(() => _saved = true);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Server URL saved')),
-    );
-  }
-
-  Future<bool> _confirm({
-    required String title,
-    required String body,
-    required String confirmLabel,
-  }) async {
-    return await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: Text(title),
-            content: Text(body),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: Text(confirmLabel),
-              ),
-            ],
-          ),
-        ) ??
-        false;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Server URL saved')));
   }
 
   Future<void> _clearDownloads() async {
-    final ok = await _confirm(
+    final ok = await showGlassConfirm(
+      context,
       title: 'Clear all downloads?',
       body:
           'Removes every downloaded MP3, lyrics, and artwork file. Song metadata, stats, and playlists are also wiped. Re-sync to bring it back.',
       confirmLabel: 'Clear',
+      destructive: true,
     );
     if (!ok || !mounted) return;
     final messenger = ScaffoldMessenger.of(context);
@@ -92,181 +103,275 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _clearHistory() async {
-    final ok = await _confirm(
+    final ok = await showGlassConfirm(
+      context,
       title: 'Clear listening history?',
       body:
           'Resets play counts, completion / skip stats, and per-mode context stats. Favorites and playlists are preserved. The AI DJ will start over from scratch.',
       confirmLabel: 'Clear',
+      destructive: true,
     );
     if (!ok || !mounted) return;
     final messenger = ScaffoldMessenger.of(context);
     final db = ref.read(appDatabaseProvider);
     await StorageInspector().clearHistory(db);
     if (!mounted) return;
-    messenger.showSnackBar(
-      const SnackBar(content: Text('History cleared')),
+    messenger.showSnackBar(const SnackBar(content: Text('History cleared')));
+  }
+
+  Future<void> _pickDefaultMode(DjMode current) async {
+    final picked = await showGlassSheet<DjMode>(
+      context,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final m in DjMode.values)
+            if (m != DjMode.general)
+              Pressable(
+                onTap: () => Navigator.pop(context, m),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 14,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          m.label,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: LumenTokens.fg(context),
+                          ),
+                        ),
+                      ),
+                      if (m == current)
+                        const Icon(
+                          Icons.check_rounded,
+                          size: 20,
+                          color: LumenTokens.accent,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+        ],
+      ),
     );
+    if (picked != null) ref.read(defaultDjModeProvider.notifier).set(picked);
   }
 
   @override
   Widget build(BuildContext context) {
     _ensureInitial();
-    final themeMode = ref.watch(themeModeProvider);
     final djVoice = ref.watch(djVoiceProvider);
     final defaultMode = ref.watch(defaultDjModeProvider);
     final storage = ref.watch(_storageInfoProvider);
+    final connect = ref.watch(connectServiceProvider);
+    final n = connect.devices.length + 1;
+    final connectLabel = !connect.configured
+        ? 'Not set up'
+        : connect.status == ConnectStatus.connecting
+        ? 'Connecting…'
+        : connect.connected
+        ? '$n device${n == 1 ? '' : 's'} · '
+              '${connect.isSelfActive
+                  ? 'playing here'
+                  : connect.activeRemote != null
+                  ? 'playing on ${connect.activeRemote!.name}'
+                  : 'idle'}'
+        : 'Offline';
 
-    final colors = Theme.of(context).colorScheme;
-    return Scaffold(
-      backgroundColor: colors.surface,
-      appBar: AppBar(
-        backgroundColor: colors.surface,
-        foregroundColor: colors.onSurface,
-        title: const Text('Settings'),
-      ),
+    return StageScaffold(
+      title: 'Settings',
       body: ListView(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.fromLTRB(
+          LumenTokens.pagePad,
+          8,
+          LumenTokens.pagePad,
+          40,
+        ),
         children: [
-          _SectionHeader(text: 'Local Wi-Fi server'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+          GlassSection(
+            title: 'Local Wi-Fi server',
+            padding: const EdgeInsets.all(14),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                TextField(
+                GlassField(
                   controller: _urlController,
-                  decoration: const InputDecoration(
-                    labelText: 'Server URL',
-                    hintText: 'http://192.101.2.87:8000',
-                    border: OutlineInputBorder(),
-                  ),
+                  hint: 'http://192.101.2.87:8000',
                   keyboardType: TextInputType.url,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  onChanged: (_) => setState(() => _saved = false),
+                  onChanged: (_) {
+                    if (_saved) setState(() => _saved = false);
+                  },
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 Align(
                   alignment: Alignment.centerRight,
-                  child: FilledButton.tonal(
+                  child: GlassButton(
+                    label: _saved ? 'Saved' : 'Save',
+                    primary: !_saved,
                     onPressed: _saved ? null : _saveUrl,
-                    child: Text(_saved ? 'Saved' : 'Save'),
                   ),
                 ),
               ],
             ),
           ),
-          const Divider(height: 32),
-          _SectionHeader(text: 'Appearance'),
-          RadioGroup<ThemeMode>(
-            groupValue: themeMode,
-            onChanged: (m) {
-              if (m != null) ref.read(themeModeProvider.notifier).set(m);
-            },
-            child: const Column(
+          const SizedBox(height: 18),
+          GlassSection(
+            title: 'Live Connect',
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                RadioListTile<ThemeMode>(
-                  value: ThemeMode.system,
-                  title: Text('System'),
+                Text(
+                  'Play across your devices. Run the connect service '
+                  '(docker compose up -d connect), then enter the same room '
+                  'code + its ws:// URL on each device.',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    height: 1.4,
+                    color: LumenTokens.fgDimOf(context),
+                  ),
                 ),
-                RadioListTile<ThemeMode>(
-                  value: ThemeMode.light,
-                  title: Text('Light'),
+                const SizedBox(height: 12),
+                GlassField(
+                  controller: _nameController,
+                  hint: 'This device name',
+                  onChanged: (_) {
+                    if (_connectSaved) setState(() => _connectSaved = false);
+                  },
                 ),
-                RadioListTile<ThemeMode>(
-                  value: ThemeMode.dark,
-                  title: Text('Dark'),
+                const SizedBox(height: 10),
+                GlassField(
+                  controller: _roomController,
+                  hint: 'Room code',
+                  onChanged: (_) {
+                    if (_connectSaved) setState(() => _connectSaved = false);
+                  },
                 ),
-              ],
-            ),
-          ),
-          const Divider(height: 32),
-          _SectionHeader(text: 'AI DJ'),
-          SwitchListTile(
-            title: const Text('DJ voice'),
-            subtitle: const Text(
-              'Plays a short pre-recorded line from the offline voice bank '
-              'before each track in a DJ queue. No cloud, no TTS — clips '
-              'live in <app docs>/dj_voice_bank/.',
-            ),
-            value: djVoice,
-            onChanged: (v) => ref.read(djVoiceProvider.notifier).set(v),
-          ),
-          ListTile(
-            title: const Text('Default mode'),
-            subtitle: Text(defaultMode.label),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () async {
-              final picked = await showDialog<DjMode>(
-                context: context,
-                builder: (ctx) => SimpleDialog(
-                  title: const Text('Default DJ mode'),
+                const SizedBox(height: 10),
+                GlassField(
+                  controller: _connectUrlController,
+                  hint: 'ws://192.168.1.20:8002/ws',
+                  keyboardType: TextInputType.url,
+                  onChanged: (_) {
+                    if (_connectSaved) setState(() => _connectSaved = false);
+                  },
+                ),
+                const SizedBox(height: 12),
+                Row(
                   children: [
-                    for (final m in DjMode.values)
-                      if (m != DjMode.general)
-                        SimpleDialogOption(
-                          onPressed: () => Navigator.pop(ctx, m),
-                          child: Text(m.label),
+                    Expanded(
+                      child: Text(
+                        connectLabel,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: connect.connected
+                              ? LumenTokens.accent
+                              : LumenTokens.fgDimOf(context),
                         ),
+                      ),
+                    ),
+                    GlassButton(
+                      label: _connectSaved ? 'Saved' : 'Save',
+                      primary: !_connectSaved,
+                      onPressed: _connectSaved ? null : _saveConnect,
+                    ),
                   ],
                 ),
-              );
-              if (picked != null) {
-                ref.read(defaultDjModeProvider.notifier).set(picked);
-              }
-            },
-          ),
-          const Divider(height: 32),
-          _SectionHeader(text: 'Storage'),
-          storage.when(
-            loading: () => const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Text('Calculating…'),
+              ],
             ),
-            error: (e, _) => ListTile(title: Text('Error: $e')),
-            data: (info) => Column(
+          ),
+          const SizedBox(height: 18),
+          GlassSection(
+            title: 'AI DJ',
+            padding: EdgeInsets.zero,
+            child: Column(
               children: [
-                ListTile(
-                  title: const Text('Used'),
-                  trailing: Text(info.human),
+                _SettingRow(
+                  title: 'DJ voice',
+                  subtitle:
+                      'Plays a short pre-recorded line from the offline voice '
+                      'bank before each track in a DJ queue. No cloud, no TTS.',
+                  trailing: Switch(
+                    value: djVoice,
+                    activeThumbColor: LumenTokens.accent,
+                    onChanged: (v) => ref.read(djVoiceProvider.notifier).set(v),
+                  ),
                 ),
-                ListTile(
-                  title: const Text('Music'),
-                  trailing: Text(formatBytes(info.musicBytes)),
-                ),
-                ListTile(
-                  title: const Text('Lyrics'),
-                  trailing: Text(formatBytes(info.lyricsBytes)),
-                ),
-                ListTile(
-                  title: const Text('Artwork'),
-                  trailing: Text(formatBytes(info.artworkBytes)),
+                const _RowDivider(),
+                _SettingRow(
+                  title: 'Default mode',
+                  subtitle: defaultMode.label,
+                  trailing: Icon(
+                    Icons.chevron_right,
+                    color: LumenTokens.fgDim2Of(context),
+                  ),
+                  onTap: () => _pickDefaultMode(defaultMode),
                 ),
               ],
             ),
           ),
-          ListTile(
-            leading: const Icon(Icons.cleaning_services_outlined),
-            title: const Text('Clear all downloads'),
-            subtitle: const Text('Files + metadata + stats + playlists'),
-            onTap: _clearDownloads,
-          ),
-          ListTile(
-            leading: const Icon(Icons.history_toggle_off),
-            title: const Text('Clear listening history'),
-            subtitle: const Text(
-              'Resets stats; favorites and playlists are kept',
+          const SizedBox(height: 18),
+          GlassSection(
+            title: 'Storage',
+            padding: EdgeInsets.zero,
+            child: storage.when(
+              loading: () => const _SettingRow(title: 'Calculating…'),
+              error: (e, _) => _SettingRow(title: 'Error: $e'),
+              data: (info) => Column(
+                children: [
+                  _SettingRow(title: 'Used', trailing: _Value(info.human)),
+                  const _RowDivider(),
+                  _SettingRow(
+                    title: 'Music',
+                    trailing: _Value(formatBytes(info.musicBytes)),
+                  ),
+                  const _RowDivider(),
+                  _SettingRow(
+                    title: 'Lyrics',
+                    trailing: _Value(formatBytes(info.lyricsBytes)),
+                  ),
+                  const _RowDivider(),
+                  _SettingRow(
+                    title: 'Artwork',
+                    trailing: _Value(formatBytes(info.artworkBytes)),
+                  ),
+                  const _RowDivider(),
+                  _SettingRow(
+                    leading: Icons.cleaning_services_outlined,
+                    title: 'Clear all downloads',
+                    subtitle: 'Files + metadata + stats + playlists',
+                    onTap: _clearDownloads,
+                  ),
+                  const _RowDivider(),
+                  _SettingRow(
+                    leading: Icons.history_toggle_off,
+                    title: 'Clear listening history',
+                    subtitle: 'Resets stats; favorites and playlists are kept',
+                    onTap: _clearHistory,
+                  ),
+                ],
+              ),
             ),
-            onTap: _clearHistory,
           ),
-          const Divider(height: 32),
-          _SectionHeader(text: 'About'),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 0, 16, 24),
+          const SizedBox(height: 18),
+          GlassSection(
+            title: 'About',
+            padding: const EdgeInsets.all(14),
             child: Text(
               'Personal offline-first music player. Songs are downloaded from '
               'a local Wi-Fi server you run on your computer (Docker + nginx) '
               'and play from local storage on this device.',
+              style: TextStyle(
+                fontSize: 13.5,
+                height: 1.5,
+                color: LumenTokens.fgDimOf(context),
+              ),
             ),
           ),
         ],
@@ -275,24 +380,94 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 }
 
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({required this.text});
+/// Plain row used *inside* a [GlassSection] pane (the section is the glass;
+/// rows stay transparent so we don't stack blur-on-blur).
+class _SettingRow extends StatelessWidget {
+  const _SettingRow({
+    this.leading,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+    this.onTap,
+  });
 
+  final IconData? leading;
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Pressable(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        child: Row(
+          children: [
+            if (leading != null) ...[
+              Icon(leading, size: 20, color: LumenTokens.fgDimOf(context)),
+              const SizedBox(width: 14),
+            ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: LumenTokens.fg(context),
+                    ),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle!,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        height: 1.35,
+                        color: LumenTokens.fgDimOf(context),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (trailing != null) ...[const SizedBox(width: 12), trailing!],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Value extends StatelessWidget {
+  const _Value(this.text);
   final String text;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      child: Text(
-        text.toUpperCase(),
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 0.5,
-          color: Theme.of(context).colorScheme.primary,
-        ),
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+        color: LumenTokens.fgDimOf(context),
+        fontFeatures: LumenTokens.tnum,
       ),
     );
+  }
+}
+
+/// Inset hairline between rows inside a section.
+class _RowDivider extends StatelessWidget {
+  const _RowDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Divider(height: 1, indent: 14, endIndent: 14);
   }
 }

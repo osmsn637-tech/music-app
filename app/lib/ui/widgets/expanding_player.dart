@@ -2,23 +2,36 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:liquid_glass_widgets/liquid_glass_widgets.dart'
+    show
+        AdaptiveGlass,
+        GlassQuality,
+        LiquidGlassSettings,
+        LiquidRoundedSuperellipse;
 
+import '../../core/services/volume_service.dart';
 import '../../core/utils/album_colors.dart';
 import '../../data/database/app_database.dart';
-import '../../features/ai_dj/ai_dj_queue_controller.dart';
 import '../../features/ai_dj/ai_dj_service.dart';
 import '../../features/ai_dj/providers.dart';
+import '../../features/automix/providers.dart';
+import '../../features/connect/providers.dart';
 import '../../features/library/album_colors_provider.dart';
-import '../../features/library/library_actions.dart';
+import '../../features/nav/nav_collapse_controller.dart';
 import '../../features/player/now_playing_controller.dart';
+import '../../features/player/playback_modes.dart';
 import '../../features/player/player_expansion_controller.dart';
 import '../../features/player/player_service.dart';
 import '../../features/player/providers.dart';
-import '../screens/lyrics_screen.dart';
+import '../screens/entity_nav.dart';
+import '../screens/lyrics_screen.dart' show InlineLyrics;
 import '../theme/app_theme.dart';
 import 'album_art.dart';
+import 'connect_sheet.dart';
 import 'bloom_background.dart';
+import 'liquid_nav_bar.dart' show NavGeometry;
 import 'song_actions.dart';
 
 /// Soft white that matches the mini-player's resolved icon colour. The
@@ -46,26 +59,7 @@ const Color _miniGlyphWhite = Color(0xF2FFFFFF);
 ///     InkWells on the transport buttons (which sit on top of it in
 ///     z-order) still receive their own taps.
 class ExpandingPlayer extends ConsumerWidget {
-  const ExpandingPlayer({
-    super.key,
-    required this.tabBarHeight,
-  });
-
-  /// Height of the home shell's tab bar, in logical pixels. The
-  /// mini-player sits flush above it; we need this to compute the
-  /// mini rect's top edge.
-  final double tabBarHeight;
-
-  /// Padding above the mini-player's bottom edge — matches the
-  /// previous mini layout's `EdgeInsets.fromLTRB(8, 0, 8, 6)`.
-  static const double _miniBottomGap = 6;
-
-  /// Mini-player visible height. Matches the previous `_MiniPlayer`'s
-  /// laid-out height (cover + progress strip + drag pill).
-  static const double _miniHeight = 86;
-
-  /// Horizontal padding on the mini-player.
-  static const double _miniHPad = 8;
+  const ExpandingPlayer({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -89,9 +83,7 @@ class ExpandingPlayer extends ConsumerWidget {
     final djQueue = ref.watch(aiDjQueueControllerProvider);
     final djActive = djQueue.isActive;
     final nowController = ref.read(nowPlayingProvider.notifier);
-    final hasPrev = djActive
-        ? djQueue.currentIndex > 0
-        : nowController.hasPrev;
+    final hasPrev = djActive ? djQueue.currentIndex > 0 : nowController.hasPrev;
     final hasNext = djActive
         ? djQueue.currentIndex + 1 < djQueue.queue.length
         : nowController.hasNext;
@@ -103,8 +95,10 @@ class ExpandingPlayer extends ConsumerWidget {
         .valueOrNull;
     final accent = palette == null
         ? const Color(0xFFFFA08F)
-        : AlbumColors.accentFromPalette(palette,
-            fallback: const Color(0xFFFFA08F));
+        : AlbumColors.accentFromPalette(
+            palette,
+            fallback: const Color(0xFFFFA08F),
+          );
 
     // ----- Gesture / callback handlers (closed over current state) ------------
     void onPlayPause() async {
@@ -133,27 +127,21 @@ class ExpandingPlayer extends ConsumerWidget {
       }
     }
 
+    final navCollapse = NavCollapseScope.read(context);
+
     return _PlayerMorph(
       song: song,
       expansion: expansion,
-      tabBarHeight: tabBarHeight,
-      miniBottomGap: _miniBottomGap,
-      miniHeight: _miniHeight,
-      miniHPad: _miniHPad,
+      navCollapse: navCollapse,
       isPlaying: isPlaying,
       loading: loading,
       hasPrev: hasPrev,
       hasNext: hasNext,
       accent: accent,
-      isFavorite: song.isFavorite == 1,
       onPlayPause: onPlayPause,
       onNext: hasNext ? onNext : null,
       onPrev: hasPrev ? onPrev : null,
-      onLyrics: () => _openLyrics(context),
-      onFavorite: () =>
-          ref.read(libraryActionsProvider).toggleFavorite(song),
-      onMore: () => SongActionsSheet.show(context, song),
-      onQueue: () => _openQueue(context, ref, djQueue),
+      onMore: () => SongActionsSheet.show(context, song, fromPlayer: true),
     );
   }
 
@@ -161,49 +149,6 @@ class ExpandingPlayer extends ConsumerWidget {
   /// Kept as a static constant so [_PlayerMorph] (separate class) can
   /// share the value without each instance re-allocating a Color.
   static const Color miniGlyphWhite = _miniGlyphWhite;
-
-  /// Push the lyrics view with a fade. Opaque — the lyrics page paints
-  /// its own black gradient bg, so once the transition completes
-  /// Flutter can STOP rendering the underlying player + shell +
-  /// StageBackground every frame. Was the dominant per-frame cost
-  /// while the lyrics page was open (every shell tab body + animated
-  /// stage blobs + the player's bloom kept painting underneath an
-  /// invisible non-opaque route).
-  void _openLyrics(BuildContext context) {
-    Navigator.of(context).push(
-      PageRouteBuilder<void>(
-        opaque: true,
-        transitionDuration: const Duration(milliseconds: 320),
-        reverseTransitionDuration: const Duration(milliseconds: 220),
-        pageBuilder: (_, _, _) => const LyricsScreen(),
-        transitionsBuilder: (_, anim, _, child) => FadeTransition(
-          opacity:
-              CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
-          child: child,
-        ),
-      ),
-    );
-  }
-
-  /// Bottom sheet with the AI DJ queue when one is active. Falls back
-  /// to a "Playing from library" message when the generic queue owns
-  /// the playhead (the now-playing controller's queue isn't exposed,
-  /// so we surface the AI DJ one which is).
-  void _openQueue(
-    BuildContext context,
-    WidgetRef ref,
-    AiDjQueueState djQueue,
-  ) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: const Color(0xFF14161A),
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => _QueueSheet(djQueue: djQueue),
-    );
-  }
 }
 
 /// Owns the per-tick layout work. Listens to the expansion controller
@@ -215,48 +160,194 @@ class ExpandingPlayer extends ConsumerWidget {
 /// Everything that depends on `e` (rects, radii, colours) is computed
 /// inside the builder. Everything that doesn't (song, accent, callbacks,
 /// favorite state) is plumbed in via constructor params.
-class _PlayerMorph extends StatelessWidget {
+class _PlayerMorph extends StatefulWidget {
   const _PlayerMorph({
     required this.song,
     required this.expansion,
-    required this.tabBarHeight,
-    required this.miniBottomGap,
-    required this.miniHeight,
-    required this.miniHPad,
+    required this.navCollapse,
     required this.isPlaying,
     required this.loading,
     required this.hasPrev,
     required this.hasNext,
     required this.accent,
-    required this.isFavorite,
     required this.onPlayPause,
     required this.onNext,
     required this.onPrev,
-    required this.onLyrics,
-    required this.onFavorite,
     required this.onMore,
-    required this.onQueue,
   });
 
   final SongRow song;
   final PlayerExpansionController expansion;
-  final double tabBarHeight;
-  final double miniBottomGap;
-  final double miniHeight;
-  final double miniHPad;
+  final NavCollapseController navCollapse;
   final bool isPlaying;
   final bool loading;
   final bool hasPrev;
   final bool hasNext;
   final Color accent;
-  final bool isFavorite;
   final VoidCallback onPlayPause;
   final VoidCallback? onNext;
   final VoidCallback? onPrev;
-  final VoidCallback onLyrics;
-  final VoidCallback onFavorite;
   final VoidCallback onMore;
-  final VoidCallback onQueue;
+
+  @override
+  State<_PlayerMorph> createState() => _PlayerMorphState();
+}
+
+class _PlayerMorphState extends State<_PlayerMorph>
+    with TickerProviderStateMixin {
+  /// Lyrics-shown morph (0 = art big & lyrics hidden, 1 = art shrunk
+  /// to thumbnail at top-left & lyrics fill the freed space).
+  /// Owned here because the toggle is player-internal UI state, not
+  /// part of the now-playing model.
+  late final AnimationController _lyricsController;
+
+  /// Queue-shown morph (0 = art big & queue hidden, 1 = art shrunk to
+  /// thumbnail & the up-next list fills the freed space). Mutually
+  /// exclusive with [_lyricsController] — opening one closes the other.
+  late final AnimationController _queueController;
+
+  /// Controls-reveal morph for full-page lyrics (0 = controls shown,
+  /// 1 = controls hidden & the lyrics grow to fill the screen). Driven by
+  /// swipe gestures on the lyric list: a downward swipe hides the controls;
+  /// an upward swipe re-shows them, but only on the *second* upward swipe
+  /// (the first one just arms the reveal — see [_onLyricsScroll]).
+  late final AnimationController _controlsReveal;
+
+  /// True once the user has made one upward swipe while the controls are
+  /// hidden; the next upward swipe actually reveals them.
+  bool _revealArmed = false;
+
+  /// Album-cover grow/shrink on play/pause (0 = paused/small, 1 = playing/
+  /// big). Animated so the size change eases in instead of snapping.
+  late final AnimationController _playController;
+
+  @override
+  void initState() {
+    super.initState();
+    _lyricsController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 380),
+      reverseDuration: const Duration(milliseconds: 260),
+      value: 0,
+    );
+    _queueController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 380),
+      reverseDuration: const Duration(milliseconds: 260),
+      value: 0,
+    );
+    _controlsReveal = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 280),
+      value: 0,
+    );
+    _playController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 320),
+      value: widget.isPlaying ? 1.0 : 0.0,
+    );
+    // Collapsing the player must always restore the controls so they're
+    // never stuck hidden on the next expand.
+    widget.expansion.animation.addListener(_resetControlsOnCollapse);
+  }
+
+  @override
+  void didUpdateWidget(covariant _PlayerMorph oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isPlaying != oldWidget.isPlaying) {
+      _playController.animateTo(
+        widget.isPlaying ? 1.0 : 0.0,
+        curve: Curves.easeOutCubic,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.expansion.animation.removeListener(_resetControlsOnCollapse);
+    _controlsReveal.dispose();
+    _queueController.dispose();
+    _playController.dispose();
+    _lyricsController.dispose();
+    super.dispose();
+  }
+
+  void _resetControlsOnCollapse() {
+    if (widget.expansion.value < 0.85 && _controlsReveal.value != 0) {
+      _controlsReveal.value = 0;
+      _revealArmed = false;
+    }
+  }
+
+  /// Swipe handler for the lyric list. A downward swipe hides the transport
+  /// (full-page lyrics); an upward swipe brings it back — but only on the
+  /// *second* upward swipe, so a casual scroll-back doesn't pop the controls
+  /// in unexpectedly.
+  void _onLyricsScroll(ScrollDirection dir) {
+    // Only meaningful while actually viewing lyrics on the open player.
+    if (_lyricsController.value < 0.5 || widget.expansion.value < 0.9) return;
+    if (dir == ScrollDirection.forward) {
+      // Finger dragging down → hide the controls.
+      _revealArmed = false;
+      if (_controlsReveal.value == 0) _controlsReveal.forward();
+    } else if (dir == ScrollDirection.reverse) {
+      // Finger dragging up → reveal, but require a second swipe.
+      if (_controlsReveal.value > 0) {
+        if (_revealArmed) {
+          _controlsReveal.reverse();
+          _revealArmed = false;
+        } else {
+          _revealArmed = true;
+        }
+      }
+    }
+  }
+
+  void _toggleLyrics() {
+    if (_lyricsController.value > 0.5) {
+      // Leaving lyrics → always restore the controls.
+      _controlsReveal.value = 0;
+      _revealArmed = false;
+      _lyricsController.animateTo(0, curve: Curves.easeOutCubic);
+    } else {
+      // Mutually exclusive with the queue surface.
+      if (_queueController.value > 0) {
+        _queueController.animateTo(0, curve: Curves.easeOutCubic);
+      }
+      _lyricsController.animateTo(1, curve: Curves.easeOutCubic);
+    }
+  }
+
+  void _toggleQueue() {
+    if (_queueController.value > 0.5) {
+      _queueController.animateTo(0, curve: Curves.easeOutCubic);
+    } else {
+      // Mutually exclusive with the lyrics surface.
+      if (_lyricsController.value > 0) {
+        _controlsReveal.value = 0;
+        _revealArmed = false;
+        _lyricsController.animateTo(0, curve: Curves.easeOutCubic);
+      }
+      _queueController.animateTo(1, curve: Curves.easeOutCubic);
+    }
+  }
+
+  /// Convenience accessors to the inner widget's props — _PlayerMorph
+  /// used to be a StatelessWidget so the build body reads them as
+  /// bare identifiers. Re-expose them as no-prefix locals via getters
+  /// to keep the build body unchanged below.
+  SongRow get song => widget.song;
+  PlayerExpansionController get expansion => widget.expansion;
+  NavCollapseController get navCollapse => widget.navCollapse;
+  bool get isPlaying => widget.isPlaying;
+  bool get loading => widget.loading;
+  bool get hasPrev => widget.hasPrev;
+  bool get hasNext => widget.hasNext;
+  Color get accent => widget.accent;
+  VoidCallback get onPlayPause => widget.onPlayPause;
+  VoidCallback? get onNext => widget.onNext;
+  VoidCallback? get onPrev => widget.onPrev;
+  VoidCallback get onMore => widget.onMore;
 
   @override
   Widget build(BuildContext context) {
@@ -268,20 +359,38 @@ class _PlayerMorph extends StatelessWidget {
     final topInset = mqPad.top;
     final bottomInset = mqPad.bottom;
 
-    // Layout values that depend ONLY on the viewport, not on `e`.
-    // Computed once per outer build (which runs only on viewport /
-    // provider changes), captured by the AnimatedBuilder closure.
-    final miniTop =
-        size.height - bottomInset - tabBarHeight - miniBottomGap - miniHeight;
-    final miniRect = Rect.fromLTWH(
-      miniHPad,
-      miniTop,
-      size.width - miniHPad * 2,
-      miniHeight,
+    // Geometry comes from NavGeometry so the mini-player lines up with
+    // the floating nav exactly. The mini has two "at-rest" shapes:
+    //   * rest    (collapse=0): own row above the expanded nav,
+    //     full width
+    //   * inline  (collapse=1): between the (shrunk) collapsed tab
+    //     pill and search button on a single, shorter row
+    // The nav row itself shrinks on collapse — rowHeightRest at the
+    // top, rowHeightCollapsed at the bottom — so the inline rect is
+    // anchored to the collapsed row's height, not the rest one.
+    final navBottomY = size.height - bottomInset - NavGeometry.bottomInset;
+    final navRowTopRest = navBottomY - NavGeometry.rowHeightRest;
+    final navRowTopCollapsed = navBottomY - NavGeometry.rowHeightCollapsed;
+
+    final miniRestRect = Rect.fromLTRB(
+      NavGeometry.hInset,
+      navRowTopRest - NavGeometry.rowGap - NavGeometry.miniRestHeight,
+      size.width - NavGeometry.hInset,
+      navRowTopRest - NavGeometry.rowGap,
     );
+    final miniInlineRect = Rect.fromLTRB(
+      NavGeometry.hInset +
+          NavGeometry.squareSideCollapsed +
+          NavGeometry.inlineGap,
+      navRowTopCollapsed,
+      size.width -
+          NavGeometry.hInset -
+          NavGeometry.squareSideCollapsed -
+          NavGeometry.inlineGap,
+      navBottomY,
+    );
+
     final fullRect = Offset.zero & size;
-    final miniArtRect =
-        Rect.fromLTWH(miniRect.left + 8, miniRect.top + 8, 56, 56);
     final fullArtSize = math.min(size.width - 100, 260.0);
     final fullArtTop = topInset + 86;
     final fullArtRect = Rect.fromLTWH(
@@ -290,131 +399,253 @@ class _PlayerMorph extends StatelessWidget {
       fullArtSize,
       fullArtSize,
     );
+    // When lyrics is shown the art shrinks to this small thumbnail
+    // tucked under the source eyebrow at the top-left, leaving the
+    // big rect free for the lyrics list. Geometry mirrors the iOS 26
+    // Apple Music "lyrics-on" header layout.
+    const lyricsThumbSize = 60.0;
+    final lyricsThumbRect = Rect.fromLTWH(
+      24,
+      topInset + 56,
+      lyricsThumbSize,
+      lyricsThumbSize,
+    );
     final transportRowY = size.height - bottomInset - 200;
-    final miniNextRect = Rect.fromLTWH(
-      miniRect.right - 8 - 48,
-      miniRect.top + 8 + (56 - 48) / 2,
-      48,
-      48,
+    final fullPlayRect = Rect.fromLTWH(
+      (size.width - 74) / 2,
+      transportRowY,
+      74,
+      74,
     );
-    final miniPlayRect = Rect.fromLTWH(
-      miniRect.right - 8 - 48 - 48,
-      miniRect.top + 8 + (56 - 48) / 2,
-      48,
-      48,
+    final fullNextRect = Rect.fromLTWH(
+      size.width / 2 + 60,
+      transportRowY + 6,
+      62,
+      62,
     );
-    final fullPlayRect =
-        Rect.fromLTWH((size.width - 74) / 2, transportRowY, 74, 74);
-    final fullNextRect =
-        Rect.fromLTWH(size.width / 2 + 60, transportRowY + 6, 62, 62);
 
     return AnimatedBuilder(
-      animation: expansion.animation,
+      animation: Listenable.merge([
+        expansion.animation,
+        navCollapse.animation,
+        _lyricsController,
+        _queueController,
+        _controlsReveal,
+        _playController,
+      ]),
       builder: (context, _) {
         final e = expansion.value;
+        final c = navCollapse.value;
+        final zL = _lyricsController.value;
+        final zQ = _queueController.value;
+        // Either surface (lyrics or queue) shrinks the art to a thumbnail and
+        // morphs the title to the top — so the shared geometry tracks the max.
+        final z = math.max(zL, zQ);
+        // Full-page lyrics controls-hide. Only effective while actually
+        // viewing lyrics on the fully-open player, so a half-open morph, the
+        // queue surface, or a collapsing player never hides the transport.
+        final hEff = (zL > 0.5 && e > 0.85) ? _controlsReveal.value : 0.0;
+        final chromeOpacity = (1.0 - hEff).clamp(0.0, 1.0);
         final atRest = e < 0.03;
 
+        // Mini rect lerps from rest → inline based on nav collapse.
+        final miniRect = Rect.lerp(miniRestRect, miniInlineRect, c)!;
+
+        // Chrome sizes lerp with c so the pill's content stays
+        // proportionate when squeezed into the shorter inline row
+        // (NavGeometry.rowHeightCollapsed = 48).
+        final miniArtSize = ui.lerpDouble(52, 36, c)!;
+        final miniBtnSize = ui.lerpDouble(40, 32, c)!;
+        final miniArtRect = Rect.fromLTWH(
+          miniRect.left + 8,
+          miniRect.top + (miniRect.height - miniArtSize) / 2,
+          miniArtSize,
+          miniArtSize,
+        );
+        final miniNextRect = Rect.fromLTWH(
+          miniRect.right - 8 - miniBtnSize,
+          miniRect.top + (miniRect.height - miniBtnSize) / 2,
+          miniBtnSize,
+          miniBtnSize,
+        );
+        final miniPlayRect = Rect.fromLTWH(
+          miniRect.right - 8 - miniBtnSize - 4 - miniBtnSize,
+          miniRect.top + (miniRect.height - miniBtnSize) / 2,
+          miniBtnSize,
+          miniBtnSize,
+        );
+        final miniRadius = ui.lerpDouble(22, 30, c)!;
+
         final cardRect = Rect.lerp(miniRect, fullRect, e)!;
-        final cardRadius = ui.lerpDouble(22, 0, e)!;
-        final artRect = Rect.lerp(miniArtRect, fullArtRect, e)!;
+        final cardRadius = ui.lerpDouble(miniRadius, 0, e)!;
+
+        // Full-mode art rect lerps from "big centred" → "small top-
+        // left thumbnail" as the lyrics toggle animates in. The
+        // expansion lerp (mini → full) chains on top so an in-flight
+        // expansion still lands on the right resting rect.
+        final fullArtRectZ = Rect.lerp(fullArtRect, lyricsThumbRect, z)!;
+        final artRect = Rect.lerp(miniArtRect, fullArtRectZ, e)!;
+        // Apple's vinyl-rise tell, but pronounced: the cover grows big while
+        // playing (1.10) and shrinks back to its resting size when paused
+        // (0.92). Driven by _playController so it eases in/out. Only applied
+        // at full mode (e≈1) and suppressed once lyrics is up.
+        final fullScale = ui.lerpDouble(0.92, 1.10, _playController.value)!;
+        final artScale = ui.lerpDouble(1.0, fullScale, e * (1 - z))!;
         final artRadius = ui.lerpDouble(12, LumenTokens.rLg, e)!;
-        final playSize = ui.lerpDouble(48, 74, e)!;
-        final nextSize = ui.lerpDouble(48, 62, e)!;
+        final playSize = ui.lerpDouble(miniBtnSize, 74, e)!;
+        final nextSize = ui.lerpDouble(miniBtnSize, 62, e)!;
         final playRect = Rect.lerp(miniPlayRect, fullPlayRect, e)!;
         final nextRect = Rect.lerp(miniNextRect, fullNextRect, e)!;
-        final glyphColor =
-            Color.lerp(ExpandingPlayer.miniGlyphWhite, accent, e)!;
+        // Mini glyphs sit on the frosted pill (light in day mode) → use a
+        // dark glyph there; they lerp to the album accent as it expands.
+        final glyphColor = Color.lerp(
+          Theme.of(context).brightness == Brightness.light
+              ? const Color(0xF2111111)
+              : ExpandingPlayer.miniGlyphWhite,
+          accent,
+          e,
+        )!;
 
         return Stack(
-            fit: StackFit.expand,
-            clipBehavior: Clip.none,
-            children: [
-              // 1. Backdrop scrim.
-              if (e > 0.0)
-                Positioned.fill(
-                  child: IgnorePointer(
-                    child: Opacity(
-                      opacity: (e * 1.5).clamp(0.0, 0.6),
-                      child: const ColoredBox(color: Colors.black),
-                    ),
-                  ),
-                ),
-
-              // 2. The card. Tap-to-expand (when at rest) only — the
-              //    drag-to-collapse handler lives on the overlay layer
-                //    at the top of the Stack so it can intercept
-              //    vertical drags from anywhere on the player,
-              //    including the album cover, title text, and any
-              //    chrome that would otherwise absorb hits.
-              Positioned.fromRect(
-                rect: cardRect,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: atRest ? expansion.expand : null,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.black,
-                      borderRadius: BorderRadius.circular(cardRadius),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(cardRadius),
-                      child: BloomBackground(
-                        song: song,
-                        darkenStrength: 0.55,
-                        // Bloom freezes audio-reactive work (FFT ticker
-                        // + kick animations) when the player is in mini
-                        // form; bg still shows the album palette, just
-                        // static. Saves ~20 Hz FFT reads + 3
-                        // AnimatedBuilders while the player isn't
-                        // expanded.
-                        audioReactive: e >= 0.2,
-                      ),
-                    ),
+          fit: StackFit.expand,
+          clipBehavior: Clip.none,
+          children: [
+            // 1. Backdrop scrim.
+            if (e > 0.0)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: Opacity(
+                    opacity: (e * 1.5).clamp(0.0, 0.6),
+                    child: const ColoredBox(color: Colors.black),
                   ),
                 ),
               ),
 
-              // 4. Mini-only chrome.
-              if (e < 0.7)
-                _MiniChrome(
-                  song: song,
-                  miniRect: miniRect,
-                  opacity: ((0.7 - e) / 0.7).clamp(0.0, 1.0),
-                  accent: accent,
+            // 2. The card. Tap-to-expand (when at rest) only — the
+            //    drag-to-collapse handler lives on the overlay layer
+            //    at the top of the Stack so it can intercept
+            //    vertical drags from anywhere on the player,
+            //    including the album cover, title text, and any
+            //    chrome that would otherwise absorb hits.
+            Positioned.fromRect(
+              rect: cardRect,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: atRest ? expansion.expand : null,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    // Bloom — visible once the player starts
+                    // expanding. Skipped entirely at mini so the FFT
+                    // ticker + 3 curtain rebuilds don't grind while
+                    // the player is collapsed.
+                    if (e > 0.05)
+                      Positioned.fill(
+                        child: Opacity(
+                          opacity: ((e - 0.05) / 0.30).clamp(0.0, 1.0),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(cardRadius),
+                            child: BloomBackground(
+                              song: song,
+                              darkenStrength: 0.55,
+                              audioReactive: e >= 0.2,
+                            ),
+                          ),
+                        ),
+                      ),
+                    // iOS 26 liquid-glass pill — sits in front of the
+                    // bloom layer and fades out as the player expands
+                    // so the mini form reads as a frosted pill and
+                    // the full form reads as the album-tinted bloom
+                    // surface.
+                    if (e < 0.5)
+                      Positioned.fill(
+                        child: Opacity(
+                          opacity: ((0.5 - e) / 0.5).clamp(0.0, 1.0),
+                          // Real iOS-26 Liquid Glass (refraction + rim
+                          // specular) in place of the old flat
+                          // BackdropFilter frost. `standard` quality uses
+                          // the lightweight calibrated shader — cheap
+                          // enough to keep up with the expand morph and it
+                          // degrades cleanly on Windows/web (premium is
+                          // Impeller-only). glassColor ≈ the old 8% white
+                          // fill so the tint reads the same.
+                          child: AdaptiveGlass(
+                            shape: LiquidRoundedSuperellipse(
+                              borderRadius: cardRadius,
+                            ),
+                            // On iOS/Impeller, premium uses the native
+                            // scene graph and samples only the surface
+                            // behind the pill. `standard` (Skia shader)
+                            // with no LiquidGlassScope blurs the whole
+                            // backdrop → the full-screen blur bug.
+                            quality: GlassQuality.premium,
+                            settings: const LiquidGlassSettings(
+                              blur: 12,
+                              thickness: 16,
+                              glassColor: Color(0x14FFFFFF),
+                              lightIntensity: 0.6,
+                              glowIntensity: 0.35,
+                            ),
+                            child: const SizedBox.expand(),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
+              ),
+            ),
 
-              // 5. Full-only chrome.
-              if (e > 0.3)
-                _FullChrome(
-                  song: song,
-                  topInset: topInset,
-                  bottomInset: bottomInset,
-                  transportRowY: transportRowY,
-                  fullArtRect: fullArtRect,
-                  hasPrev: hasPrev,
-                  accent: accent,
-                  opacity: ((e - 0.3) / 0.7).clamp(0.0, 1.0),
-                  onPrev: onPrev,
-                  onDismiss: expansion.collapse,
-                  onFavorite: onFavorite,
-                  isFavorite: isFavorite,
-                  onLyrics: onLyrics,
-                  onQueue: onQueue,
-                  onMore: onMore,
-                ),
+            // 4. Mini-only chrome.
+            if (e < 0.7)
+              _MiniChrome(
+                song: song,
+                miniRect: miniRect,
+                miniArtSize: miniArtSize,
+                miniBtnSize: miniBtnSize,
+                opacity: ((0.7 - e) / 0.7).clamp(0.0, 1.0),
+                collapse: c,
+                accent: accent,
+              ),
 
-              // 6. Shared morphing artwork. Wrapped in IgnorePointer so
-              //    the RenderImage doesn't absorb pointer events without
-              //    handling them — without this, taps on the cover in
-              //    mini form go nowhere (album art absorbs but has no
-              //    gesture handler), and the drag overlay below can't
-              //    receive its hits either. With IgnorePointer, hits on
-              //    the cover propagate down through the Stack until they
-              //    reach the card's tap handler (mini → expand) or the
-              //    drag overlay (full → collapse on swipe).
-              Positioned.fromRect(
-                rect: artRect,
-                child: IgnorePointer(
+            // 5. Full-only chrome.
+            if (e > 0.3)
+              _FullChrome(
+                song: song,
+                topInset: topInset,
+                bottomInset: bottomInset,
+                transportRowY: transportRowY,
+                fullArtRect: fullArtRect,
+                lyricsThumbRect: lyricsThumbRect,
+                hasPrev: hasPrev,
+                isPlaying: isPlaying,
+                accent: accent,
+                opacity: ((e - 0.3) / 0.7).clamp(0.0, 1.0),
+                lyricsValue: zL,
+                queueValue: zQ,
+                controlsReveal: hEff,
+                onPrev: onPrev,
+                onDismiss: expansion.collapse,
+                onToggleLyrics: _toggleLyrics,
+                onToggleQueue: _toggleQueue,
+                onLyricsScroll: _onLyricsScroll,
+                onMore: onMore,
+              ),
+
+            // 6. Shared morphing artwork. Wrapped in IgnorePointer so
+            //    the RenderImage doesn't absorb pointer events without
+            //    handling them — without this, taps on the cover in
+            //    mini form go nowhere (album art absorbs but has no
+            //    gesture handler), and the drag overlay below can't
+            //    receive its hits either. With IgnorePointer, hits on
+            //    the cover propagate down through the Stack until they
+            //    reach the card's tap handler (mini → expand) or the
+            //    drag overlay (full → collapse on swipe).
+            Positioned.fromRect(
+              rect: artRect,
+              child: IgnorePointer(
+                child: Transform.scale(
+                  scale: artScale,
                   child: AlbumArt(
                     artworkPath: song.localArtworkPath,
                     seed: song.id,
@@ -423,136 +654,401 @@ class _PlayerMorph extends StatelessWidget {
                   ),
                 ),
               ),
+            ),
 
-              // 7. Shared morphing play / pause.
-              Positioned.fromRect(
-                rect: playRect,
-                child: _GlyphButton(
-                  icon: loading
-                      ? Icons.hourglass_top_rounded
-                      : isPlaying
-                          ? Icons.pause_rounded
-                          : Icons.play_arrow_rounded,
-                  size: playSize,
-                  color: glyphColor,
-                  onTap: onPlayPause,
-                ),
-              ),
-
-              // 8. Shared morphing next.
-              Positioned.fromRect(
-                rect: nextRect,
-                child: _GlyphButton(
-                  icon: Icons.fast_forward_rounded,
-                  size: nextSize,
-                  color: hasNext
-                      ? glyphColor
-                      : Colors.white.withValues(alpha: 0.20),
-                  onTap: onNext,
-                ),
-              ),
-
-              // 9. Drag-to-collapse overlay. Sits at the top of the
-              //    z-order with HitTestBehavior.translucent and only
-              //    vertical-drag handlers — no tap, no opaque hit. The
-              //    translucent behavior lets the hit propagate down so
-              //    InkWell buttons (play / next / favorite / etc.)
-              //    still get their taps; the gesture arena routes any
-              //    vertical motion exceeding slop to this overlay
-              //    instead. Result: drag-down to collapse works from
-              //    anywhere on the player — album cover, title text,
-              //    chrome — without breaking button taps.
-              Positioned.fromRect(
-                rect: cardRect,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  onVerticalDragUpdate: (d) => expansion.dragBy(d.delta.dy),
-                  onVerticalDragEnd: (d) => expansion.endDrag(
-                    velocity: d.velocity.pixelsPerSecond.dy,
+            // 7. Shared morphing play / pause. Fades out with the rest of
+            //    the transport when controls auto-hide for full-page lyrics
+            //    (the shared transport half lives here, not in _FullChrome).
+            Positioned.fromRect(
+              rect: playRect,
+              child: Opacity(
+                opacity: chromeOpacity,
+                child: IgnorePointer(
+                  ignoring: hEff > 0.5,
+                  child: _GlyphButton(
+                    icon: loading
+                        ? Icons.hourglass_top_rounded
+                        : isPlaying
+                        ? Icons.pause_rounded
+                        : Icons.play_arrow_rounded,
+                    size: playSize,
+                    color: glyphColor,
+                    onTap: onPlayPause,
                   ),
                 ),
               ),
-            ],
-          ),
+            ),
+
+            // 8. Shared morphing next.
+            Positioned.fromRect(
+              rect: nextRect,
+              child: Opacity(
+                opacity: chromeOpacity,
+                child: IgnorePointer(
+                  ignoring: hEff > 0.5,
+                  child: _GlyphButton(
+                    icon: Icons.fast_forward_rounded,
+                    size: nextSize,
+                    color: hasNext
+                        ? glyphColor
+                        : Colors.white.withValues(alpha: 0.20),
+                    onTap: onNext,
+                  ),
+                ),
+              ),
+            ),
+
+            // 9. Drag-to-collapse overlay. Sits at the top of the
+            //    z-order with HitTestBehavior.translucent and only
+            //    vertical-drag handlers — no tap, no opaque hit. The
+            //    translucent behavior lets the hit propagate down so
+            //    InkWell buttons (play / next / favorite / etc.)
+            //    still get their taps; the gesture arena routes any
+            //    vertical motion exceeding slop to this overlay
+            //    instead. Result: drag-down to collapse works from
+            //    anywhere on the player — album cover, title text,
+            //    chrome — without breaking button taps.
+            //
+            //    EXCEPT in lyrics mode: there the overlay would win the
+            //    lyric list's vertical scroll gesture, so it shrinks to just
+            //    the top header strip (grabber + thumbnail + title). Drag the
+            //    header to collapse; the lyrics below scroll freely.
+            Positioned.fromRect(
+              rect: z > 0.5
+                  ? Rect.fromLTRB(
+                      cardRect.left,
+                      cardRect.top,
+                      cardRect.right,
+                      lyricsThumbRect.bottom + 8,
+                    )
+                  : cardRect,
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onVerticalDragUpdate: (d) => expansion.dragBy(d.delta.dy),
+                onVerticalDragEnd: (d) =>
+                    expansion.endDrag(velocity: d.velocity.pixelsPerSecond.dy),
+              ),
+            ),
+          ],
         );
       },
     );
   }
 }
 
-/// Queue bottom sheet. Shows the AI DJ queue with the active row
-/// highlighted; tapping a row jumps the DJ to that entry. Renders a
-/// plain "playing from library" hint when the DJ is idle.
-class _QueueSheet extends ConsumerWidget {
-  const _QueueSheet({required this.djQueue});
-
-  final AiDjQueueState djQueue;
+/// Inline up-next surface — replaces the old modal queue sheet. Fills the
+/// freed area when the queue button is active (mirrors the inline lyrics
+/// surface). Shows the AI DJ queue (tap to jump) when the DJ owns the
+/// playhead; otherwise the reorderable generic playback queue. A playback-
+/// mode control strip (repeat · shuffle · infinity · automix) sits pinned
+/// below the list.
+class _InlineQueue extends ConsumerWidget {
+  const _InlineQueue();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final djQueue = ref.watch(aiDjQueueControllerProvider);
     final entries = djQueue.queue;
-    final active = djQueue.isActive && entries.isNotEmpty;
-    return SafeArea(
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.7,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 14, 20, 8),
-              child: Row(
-                children: [
-                  Icon(Icons.queue_music_rounded, color: Colors.white),
-                  SizedBox(width: 10),
-                  Text(
-                    'Up next',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
+    final djActive = djQueue.isActive && entries.isNotEmpty;
+    return Column(
+      children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(24, 0, 24, 8),
+          child: Row(
+            children: [
+              Icon(
+                Icons.queue_music_rounded,
+                size: 18,
+                color: Color(0xB3FFFFFF),
               ),
-            ),
-            const Divider(height: 1, color: Color(0x22FFFFFF)),
-            if (!active)
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 36,
+              SizedBox(width: 8),
+              Text(
+                'Up Next',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.2,
                 ),
-                child: Text(
-                  'Playing from your library. Use AI DJ for a curated queue.',
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.65),
-                    fontSize: 14,
-                  ),
-                ),
-              )
-            else
-              Flexible(
-                child: ListView.builder(
-                  shrinkWrap: true,
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: djActive
+              ? ListView.builder(
+                  padding: const EdgeInsets.only(bottom: 8),
                   itemCount: entries.length,
                   itemBuilder: (_, i) {
                     final entry = entries[i];
-                    final isCurrent = i == djQueue.currentIndex;
                     return _QueueRow(
                       entry: entry,
-                      isCurrent: isCurrent,
-                      onTap: () {
-                        ref
-                            .read(aiDjQueueControllerProvider.notifier)
-                            .playAt(i);
-                        Navigator.of(context).pop();
-                      },
+                      isCurrent: i == djQueue.currentIndex,
+                      onTap: () => ref
+                          .read(aiDjQueueControllerProvider.notifier)
+                          .playAt(i),
                     );
                   },
+                )
+              : const _GenericQueueList(inline: true),
+        ),
+        const _QueueControlsRow(),
+      ],
+    );
+  }
+}
+
+/// Playback-mode control strip below the inline queue: repeat, shuffle,
+/// infinity (never-ending queue — auto-continues with another album by the
+/// same artist when it runs out), and automix (beat-matched transitions).
+/// Active state uses the app's pink accent — NOT the album-cover tint.
+class _QueueControlsRow extends ConsumerWidget {
+  const _QueueControlsRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final modes = ref.watch(playbackModesProvider);
+    final controller = ref.read(nowPlayingProvider.notifier);
+    final automixOn = ref.watch(autoMixEnabledProvider);
+    const pink = LumenTokens.accent;
+    final dim = Colors.white.withValues(alpha: 0.6);
+
+    final repeatOn = modes.repeat != QueueRepeatMode.off;
+    final repeatIcon = modes.repeat == QueueRepeatMode.one
+        ? Icons.repeat_one_rounded
+        : Icons.repeat_rounded;
+
+    return Container(
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: Color(0x14FFFFFF))),
+      ),
+      padding: const EdgeInsets.fromLTRB(28, 10, 28, 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          _QueueControl(
+            icon: repeatIcon,
+            label: 'Repeat',
+            active: repeatOn,
+            accent: pink,
+            dim: dim,
+            onTap: controller.cycleRepeat,
+          ),
+          _QueueControl(
+            icon: Icons.shuffle_rounded,
+            label: 'Shuffle',
+            active: modes.shuffle,
+            accent: pink,
+            dim: dim,
+            onTap: controller.toggleShuffle,
+          ),
+          _QueueControl(
+            icon: Icons.all_inclusive_rounded,
+            label: 'Infinity',
+            active: modes.endless,
+            accent: pink,
+            dim: dim,
+            onTap: controller.toggleEndless,
+          ),
+          _QueueControl(
+            icon: Icons.auto_awesome_rounded,
+            label: 'Automix',
+            active: automixOn,
+            accent: pink,
+            dim: dim,
+            onTap: () =>
+                ref.read(autoMixEnabledProvider.notifier).update((v) => !v),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _QueueControl extends StatelessWidget {
+  const _QueueControl({
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.accent,
+    required this.dim,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool active;
+  final Color accent;
+  final Color dim;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = active ? accent : dim;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 24, color: color),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The generic playback queue (library / artist / album / playlist),
+/// reorderable, with per-row remove and tap-to-jump.
+class _GenericQueueList extends ConsumerWidget {
+  const _GenericQueueList({this.inline = false});
+
+  /// When embedded in the player's inline queue surface (vs. a modal sheet):
+  /// fills its bounded parent + scrolls instead of shrink-wrapping, and a
+  /// tap-to-jump doesn't pop any route.
+  final bool inline;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final controller = ref.read(nowPlayingProvider.notifier);
+    return ValueListenableBuilder<QueueView>(
+      valueListenable: controller.queueView,
+      builder: (context, qv, _) {
+        final queue = qv.queue;
+        if (queue.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 36),
+            child: Text(
+              'Nothing queued. Play a song or album to build a queue.',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.65),
+                fontSize: 14,
+              ),
+            ),
+          );
+        }
+        return ReorderableListView.builder(
+          shrinkWrap: !inline,
+          buildDefaultDragHandles: false,
+          padding: const EdgeInsets.only(bottom: 8),
+          itemCount: queue.length,
+          onReorder: controller.reorderQueue,
+          itemBuilder: (context, i) {
+            final s = queue[i];
+            final isCurrent = i == qv.index;
+            return _GenericQueueRow(
+              key: ValueKey('${s.id}_$i'),
+              song: s,
+              index: i,
+              isCurrent: isCurrent,
+              onTap: () {
+                controller.jumpTo(i);
+                if (!inline) Navigator.of(context).pop();
+              },
+              onRemove: isCurrent ? null : () => controller.removeFromQueue(i),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _GenericQueueRow extends StatelessWidget {
+  const _GenericQueueRow({
+    super.key,
+    required this.song,
+    required this.index,
+    required this.isCurrent,
+    required this.onTap,
+    required this.onRemove,
+  });
+
+  final SongRow song;
+  final int index;
+  final bool isCurrent;
+  final VoidCallback onTap;
+  final VoidCallback? onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            AlbumArt(
+              artworkPath: song.localArtworkPath,
+              seed: song.id,
+              size: 42,
+              radius: 8,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    song.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: isCurrent ? LumenTokens.accent : Colors.white,
+                    ),
+                  ),
+                  if (song.artist != null)
+                    Text(
+                      song.artist!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.white.withValues(alpha: 0.55),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (isCurrent)
+              const Padding(
+                padding: EdgeInsets.only(right: 8),
+                child: Icon(
+                  Icons.graphic_eq_rounded,
+                  size: 18,
+                  color: LumenTokens.accent,
                 ),
               ),
+            if (onRemove != null)
+              _GlyphButton(
+                icon: Icons.remove_circle_outline_rounded,
+                size: 22,
+                color: Colors.white.withValues(alpha: 0.5),
+                onTap: onRemove!,
+              ),
+            ReorderableDragStartListener(
+              index: index,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 6),
+                child: Icon(
+                  Icons.drag_handle_rounded,
+                  size: 22,
+                  color: Colors.white.withValues(alpha: 0.4),
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -605,8 +1101,9 @@ class _QueueRow extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: Colors.white
-                            .withValues(alpha: isCurrent ? 1.0 : 0.92),
+                        color: Colors.white.withValues(
+                          alpha: isCurrent ? 1.0 : 0.92,
+                        ),
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
                       ),
@@ -674,35 +1171,56 @@ class _MiniChrome extends ConsumerWidget {
   const _MiniChrome({
     required this.song,
     required this.miniRect,
+    required this.miniArtSize,
+    required this.miniBtnSize,
     required this.opacity,
+    required this.collapse,
     required this.accent,
   });
 
   final dynamic song; // SongRow — typed dynamic so we avoid the import.
   final Rect miniRect;
+  final double miniArtSize;
+  final double miniBtnSize;
   final double opacity;
+
+  /// Nav-collapse value (0 = at-rest, 1 = inline). Used to fade the
+  /// rest-only chrome (artist subtitle) as the mini squeezes into the
+  /// inline slot — Apple Music's collapsed pill is single-line.
+  final double collapse;
   final Color accent;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Title + artist text. Sits between the mini cover and the play/next
-    // glyphs. Width = mini width minus art (56) minus glyphs (48×2) minus
-    // paddings (8 outer + 12 art gap + 4 trailing gap).
-    final titleLeft = miniRect.left + 8 + 56 + 12;
-    final titleRight = miniRect.right - 8 - 48 - 48 - 4;
-    final titleTop = miniRect.top + 8 + 4;
+    // Title + artist text sits between the mini cover and the
+    // play/next glyphs. Widths and positions follow the lerped mini
+    // chrome sizes so the row stays tight at both endpoints.
+    final titleLeft = miniRect.left + 8 + miniArtSize + 12;
+    final titleRight = miniRect.right - 8 - miniBtnSize - 4 - miniBtnSize - 4;
+    final maxWidth = math.max(0.0, titleRight - titleLeft);
+
+    // Rest-only chrome (artist subtitle) fades out as collapse → 1.
+    final restOnlyOpacity = (1.0 - collapse * 1.6).clamp(0.0, 1.0);
+    final showArtist = song.artist != null && restOnlyOpacity > 0.05;
+
+    // Centre the title block vertically in the mini rect — works for
+    // both single-line (inline) and two-line (rest) variants because
+    // the column hugs its content.
+    final blockTop =
+        miniRect.top + miniRect.height / 2 - (showArtist ? 22 : 11);
+
+    final titleSize = ui.lerpDouble(16, 14, collapse)!;
+
     return IgnorePointer(
       ignoring: opacity < 0.05,
       child: Opacity(
         opacity: opacity,
         child: Stack(
           children: [
-            // Title row.
             Positioned(
               left: titleLeft,
-              right: math.max(0, MediaQuery.of(context).size.width -
-                  titleRight),
-              top: titleTop,
+              top: blockTop,
+              width: maxWidth,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
@@ -711,48 +1229,31 @@ class _MiniChrome extends ConsumerWidget {
                     song.title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 16,
+                    style: TextStyle(
+                      fontSize: titleSize,
                       fontWeight: FontWeight.w700,
                       letterSpacing: -0.2,
-                      color: Colors.white,
+                      // Theme-aware: the mini bar is a frosted pill, light
+                      // in day mode — white text would wash out there.
+                      color: LumenTokens.fg(context),
+                      height: 1.1,
                     ),
                   ),
-                  if (song.artist != null)
-                    Text(
-                      song.artist!,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.white.withValues(alpha: 0.65),
+                  if (showArtist)
+                    Opacity(
+                      opacity: restOnlyOpacity,
+                      child: Text(
+                        song.artist!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: LumenTokens.fgDimOf(context),
+                          height: 1.2,
+                        ),
                       ),
                     ),
                 ],
-              ),
-            ),
-            // Slim progress strip.
-            Positioned(
-              left: miniRect.left + 12,
-              right: MediaQuery.of(context).size.width -
-                  miniRect.right + 12,
-              top: miniRect.top + 8 + 56 + 6,
-              child: const _SlimProgress(),
-            ),
-            // Drag pill at the bottom of the mini.
-            Positioned(
-              left: 0,
-              right: 0,
-              top: miniRect.bottom - 10,
-              child: Center(
-                child: Container(
-                  width: 64,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.35),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
               ),
             ),
           ],
@@ -762,33 +1263,22 @@ class _MiniChrome extends ConsumerWidget {
   }
 }
 
-class _SlimProgress extends ConsumerWidget {
-  const _SlimProgress();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final position =
-        ref.watch(playerPositionProvider).valueOrNull ?? Duration.zero;
-    final duration =
-        ref.watch(playerDurationProvider).valueOrNull ?? Duration.zero;
-    final progress = duration.inMilliseconds <= 0
-        ? 0.0
-        : (position.inMilliseconds / duration.inMilliseconds)
-            .clamp(0.0, 1.0);
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(1),
-      child: LinearProgressIndicator(
-        value: progress,
-        minHeight: 2,
-        backgroundColor: Colors.white.withValues(alpha: 0.12),
-        valueColor: AlwaysStoppedAnimation(
-          Colors.white.withValues(alpha: 0.55),
-        ),
-      ),
-    );
-  }
-}
-
+/// Full-mode chrome. iOS 26 Apple Music layout:
+///
+///   - Grabber pill (top centre, drag affordance)
+///   - Source eyebrow ("PLAYING FROM ALBUM · Name")
+///   - Album art (rendered by the shared morphing layer above; we just
+///     read [fullArtRect] / [lyricsThumbRect] for layout maths)
+///   - Title row (title + artist + more button), left-aligned
+///   - Slim scrubber + time labels
+///   - Transport row (prev + shared play/next)
+///   - Volume slider with speaker glyphs
+///   - Actions row — Lyrics · Connect · Queue
+///
+/// When [lyricsValue] or [queueValue] animates from 0 → 1, the title row
+/// morphs from "below big art" to "next to the small thumbnail at top-left"
+/// and the matching surface ([InlineLyrics] / [_InlineQueue]) fades in to
+/// fill the freed area.
 class _FullChrome extends ConsumerWidget {
   const _FullChrome({
     required this.song,
@@ -796,15 +1286,19 @@ class _FullChrome extends ConsumerWidget {
     required this.bottomInset,
     required this.transportRowY,
     required this.fullArtRect,
+    required this.lyricsThumbRect,
     required this.hasPrev,
+    required this.isPlaying,
     required this.accent,
     required this.opacity,
+    required this.lyricsValue,
+    required this.queueValue,
+    required this.controlsReveal,
     required this.onPrev,
     required this.onDismiss,
-    required this.onFavorite,
-    required this.isFavorite,
-    required this.onLyrics,
-    required this.onQueue,
+    required this.onToggleLyrics,
+    required this.onToggleQueue,
+    required this.onLyricsScroll,
     required this.onMore,
   });
 
@@ -812,46 +1306,84 @@ class _FullChrome extends ConsumerWidget {
   final double topInset;
   final double bottomInset;
   final double transportRowY;
-  /// Final at-rest rect of the morphing artwork. The glass album card
-  /// is positioned 18 px around it; the title + artist row sit below.
   final Rect fullArtRect;
+  final Rect lyricsThumbRect;
   final bool hasPrev;
+  final bool isPlaying;
   final Color accent;
   final double opacity;
+
+  /// 0 = art mode, 1 = lyrics mode.
+  final double lyricsValue;
+
+  /// 0 = art mode, 1 = inline-queue mode. Shares the art-shrink / title
+  /// morph with [lyricsValue] (the geometry tracks whichever is larger).
+  final double queueValue;
+
+  /// 0 = controls shown, 1 = controls hidden & lyrics fill the screen.
+  final double controlsReveal;
   final VoidCallback? onPrev;
   final VoidCallback onDismiss;
-  final VoidCallback onFavorite;
-  final bool isFavorite;
-  final VoidCallback onLyrics;
-  final VoidCallback onQueue;
+  final VoidCallback onToggleLyrics;
+  final VoidCallback onToggleQueue;
+
+  /// Forwarded from the lyric list's scroll gestures so the host can
+  /// hide/reveal the transport (swipe down = hide; 2nd swipe up = show).
+  final void Function(ScrollDirection direction) onLyricsScroll;
   final VoidCallback onMore;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final size = MediaQuery.of(context).size;
+    final size = MediaQuery.sizeOf(context);
+    // Either surface (lyrics or queue) drives the art-shrink + title morph.
+    final z = math.max(lyricsValue, queueValue);
 
-    // Album card geometry. The card hugs the art with 18 px padding on
-    // three sides and extends below it for the FitTitle (≤ 30 px) +
-    // gap + artist row (38 px) + bottom padding.
-    const cardSidePad = 18.0;
-    const artToTitleGap = 22.0;
-    const titleHeight = 30.0;
-    const titleToArtistGap = 12.0;
-    const artistRowHeight = 38.0;
-    const cardBottomPad = 18.0;
-    final cardRect = Rect.fromLTRB(
-      fullArtRect.left - cardSidePad,
-      fullArtRect.top - cardSidePad,
-      fullArtRect.right + cardSidePad,
-      fullArtRect.bottom +
-          artToTitleGap +
-          titleHeight +
-          titleToArtistGap +
-          artistRowHeight +
-          cardBottomPad,
+    // Vertical layout — anchored to the bottom edge of the screen so
+    // every chrome row sits at the same absolute position on a given
+    // device regardless of art size.
+    final scrubberTop = transportRowY - 60;
+    final volumeTop = size.height - bottomInset - 130;
+    final actionsBottom = bottomInset + 18;
+
+    // Title row morph. At z=0 it sits in a full-width block below the
+    // big artwork; at z=1 it slots next to the small thumbnail at the
+    // top so the rest of the screen is free for lyrics.
+    final titleRectAtRest = Rect.fromLTRB(
+      24,
+      fullArtRect.bottom + 22,
+      size.width - 24,
+      fullArtRect.bottom + 22 + 58,
     );
-    final titleTop = fullArtRect.bottom + artToTitleGap;
-    final artistRowTop = titleTop + titleHeight + titleToArtistGap;
+    final titleRectAtLyrics = Rect.fromLTRB(
+      lyricsThumbRect.right + 12,
+      lyricsThumbRect.top + 2,
+      size.width - 24,
+      lyricsThumbRect.bottom + 2,
+    );
+    final titleRect = Rect.lerp(titleRectAtRest, titleRectAtLyrics, z)!;
+
+    // Lyrics / queue surface fills the visual area where the big art used to
+    // be. Top edge tracks z so the surface enters from the art's top edge
+    // (z<0.3 ≈ behind the art) and ends up below the thumbnail at z=1.
+    final surfaceTop = ui.lerpDouble(
+      fullArtRect.top,
+      lyricsThumbRect.bottom + 8,
+      z,
+    )!;
+    // When the lyrics controls hide on swipe-down, the pane grows down into
+    // the freed space (full-page lyrics). InlineLyrics' percentage-based
+    // ListView padding re-anchors itself as the viewport grows. The queue
+    // surface never hides the controls (controlsReveal stays 0 for it).
+    final surfaceBottom = ui.lerpDouble(
+      scrubberTop - 12,
+      size.height - bottomInset - 12,
+      controlsReveal,
+    )!;
+    final surfaceRect = Rect.fromLTRB(0, surfaceTop, size.width, surfaceBottom);
+
+    // Bottom-control fade driven by the auto-hide reveal.
+    final chromeOpacity = (1.0 - controlsReveal).clamp(0.0, 1.0);
+    final chromeGone = controlsReveal > 0.5;
 
     return IgnorePointer(
       ignoring: opacity < 0.05,
@@ -859,169 +1391,118 @@ class _FullChrome extends ConsumerWidget {
         opacity: opacity,
         child: Stack(
           children: [
-            // 1. Top chrome — chevron + eyebrow + more_horiz. Favorite
-            //    moved into the album card per the Lumen handoff.
+            // 1. Grabber pill.
             Positioned(
               left: 0,
               right: 0,
               top: topInset + 8,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 22),
-                child: Row(
-                  children: [
-                    _RoundIcon(
-                      icon: Icons.keyboard_arrow_down,
-                      onTap: onDismiss,
-                    ),
-                    Expanded(
-                      child: Column(
-                        children: [
-                          Text(
-                            song.album != null
-                                ? 'PLAYING FROM ALBUM'
-                                : 'PLAYING FROM YOUR LIBRARY',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.5,
-                              color: Colors.white.withValues(alpha: 0.58),
-                              shadows: const [
-                                Shadow(
-                                  color: Color.fromRGBO(0, 0, 0, 0.6),
-                                  blurRadius: 6,
-                                  offset: Offset(0, 1),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            song.album ?? song.artist ?? '',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
-                              shadows: [
-                                Shadow(
-                                  color: Color.fromRGBO(0, 0, 0, 0.6),
-                                  blurRadius: 6,
-                                  offset: Offset(0, 1),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    _RoundIcon(
-                      icon: Icons.more_horiz_rounded,
-                      onTap: onMore,
-                    ),
-                  ],
-                ),
-              ),
+              child: const _Grabber(),
             ),
 
-            // 2. Glass album card — sits behind the morphing artwork and
-            //    extends below for the title + artist row. The art
-            //    itself is rendered on top by the parent Stack's shared
-            //    layer, so this is just the surrounding glass surface.
+            // 2. Source eyebrow.
+            Positioned(
+              left: 24,
+              right: 24,
+              top: topInset + 24,
+              child: _SourceEyebrow(song: song),
+            ),
+
+            // 3. Inline lyrics — fades in as lyricsValue → 1.
+            if (lyricsValue > 0.01)
+              Positioned.fromRect(
+                rect: surfaceRect,
+                child: Opacity(
+                  opacity: ((lyricsValue - 0.3) / 0.7).clamp(0.0, 1.0),
+                  child: InlineLyrics(onScrollGesture: onLyricsScroll),
+                ),
+              ),
+
+            // 3b. Inline up-next queue — fades in as queueValue → 1.
+            if (queueValue > 0.01)
+              Positioned.fromRect(
+                rect: surfaceRect,
+                child: Opacity(
+                  opacity: ((queueValue - 0.3) / 0.7).clamp(0.0, 1.0),
+                  child: const _InlineQueue(),
+                ),
+              ),
+
+            // 4. Title row.
             Positioned.fromRect(
-              rect: cardRect,
-              child: const _GlassAlbumCard(),
+              rect: titleRect,
+              child: _TitleRow(song: song, lyricsValue: z, onMore: onMore),
             ),
 
-            // 3. FitTitle — shrinks 30 → 18 to keep the title on one
-            //    line within the card's horizontal extent.
-            Positioned(
-              left: fullArtRect.left,
-              top: titleTop,
-              width: fullArtRect.width,
-              child: _FitTitle(text: song.title),
-            ),
-
-            // 4. Artist row — text + inline favorite + more_vert. The
-            //    favorite and more buttons that used to live in the top
-            //    chrome move here per the handoff layout.
-            Positioned(
-              left: fullArtRect.left,
-              top: artistRowTop,
-              width: fullArtRect.width,
-              child: SizedBox(
-                height: artistRowHeight,
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        song.artist ?? 'Unknown artist',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white.withValues(alpha: 0.72),
-                        ),
-                      ),
-                    ),
-                    _InlineIconButton(
-                      icon: isFavorite
-                          ? Icons.favorite
-                          : Icons.favorite_border,
-                      iconSize: 26,
-                      color: isFavorite
-                          ? const Color(0xFFFF5C7A)
-                          : Colors.white.withValues(alpha: 0.76),
-                      onTap: onFavorite,
-                    ),
-                    _InlineIconButton(
-                      icon: Icons.more_vert_rounded,
-                      iconSize: 24,
-                      color: Colors.white.withValues(alpha: 0.58),
-                      onTap: onMore,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            // 5. Big progress bar above the transport row.
+            // 5. Slim scrubber + time labels.
             Positioned(
               left: 22,
               right: 22,
-              top: transportRowY - 60,
-              child: const _FullProgress(),
+              top: scrubberTop,
+              height: 50,
+              child: Opacity(
+                opacity: chromeOpacity,
+                child: IgnorePointer(
+                  ignoring: chromeGone,
+                  child: _SlimScrubber(accent: accent),
+                ),
+              ),
             ),
 
-            // 6. Prev button — the shared layer owns play+next.
+            // 6. Prev button (play+next are shared with the mini layer).
             Positioned(
               left: size.width / 2 - 122,
               top: transportRowY + 6,
               width: 62,
               height: 62,
-              child: _GlyphButton(
-                icon: Icons.fast_rewind_rounded,
-                size: 62,
-                color: hasPrev
-                    ? accent
-                    : Colors.white.withValues(alpha: 0.20),
-                onTap: onPrev,
+              child: Opacity(
+                opacity: chromeOpacity,
+                child: IgnorePointer(
+                  ignoring: chromeGone,
+                  child: _GlyphButton(
+                    icon: Icons.fast_rewind_rounded,
+                    size: 62,
+                    color: hasPrev
+                        ? accent
+                        : Colors.white.withValues(alpha: 0.20),
+                    onTap: onPrev,
+                  ),
+                ),
               ),
             ),
 
-            // 7. Niche bar — Tune (placeholder, inactive until bass
-            //    tweaks land) + Lyrics pill + Queue. Mirrors the Lumen
-            //    handoff layout exactly.
+            // 7. Volume row.
+            Positioned(
+              left: 22,
+              right: 22,
+              top: volumeTop,
+              height: 30,
+              child: Opacity(
+                opacity: chromeOpacity,
+                child: IgnorePointer(
+                  ignoring: chromeGone,
+                  child: const _VolumeRow(),
+                ),
+              ),
+            ),
+
+            // 8. Actions row — Lyrics · Connect · Queue.
             Positioned(
               left: 0,
               right: 0,
-              bottom: bottomInset + 24,
-              child: _NicheBar(
-                accent: accent,
-                onTune: () {},
-                onLyrics: onLyrics,
-                onQueue: onQueue,
+              bottom: actionsBottom,
+              height: 48,
+              child: Opacity(
+                opacity: chromeOpacity,
+                child: IgnorePointer(
+                  ignoring: chromeGone,
+                  child: _ActionsRow(
+                    accent: accent,
+                    lyricsActive: lyricsValue > 0.5,
+                    queueActive: queueValue > 0.5,
+                    onToggleLyrics: onToggleLyrics,
+                    onToggleQueue: onToggleQueue,
+                  ),
+                ),
               ),
             ),
           ],
@@ -1031,184 +1512,440 @@ class _FullChrome extends ConsumerWidget {
   }
 }
 
-/// The Lumen handoff's `AlbumCard` — translucent dark fill with a 1 px
-/// white rim, a soft drop shadow, and a top-edge highlight gradient
-/// that fakes an inset white shadow.
-///
-/// Previously wrapped in `BackdropFilter(σ=25)` for a live-blurred glass
-/// look — that was a saveLayer + 25-sigma blur on a ~280×370 surface
-/// every paint, the single most expensive widget on the full player.
-/// The sibling round-icons and lyrics pill already dropped their
-/// BackdropFilters for the same reason; the card now matches them with
-/// a heavier-alpha tinted fill that reads the same against the bloom.
-class _GlassAlbumCard extends StatelessWidget {
-  const _GlassAlbumCard();
+/// Tiny rounded pill at the top centre of the player. Purely visual —
+/// the drag-to-collapse handler lives on the parent's gesture overlay.
+class _Grabber extends StatelessWidget {
+  const _Grabber();
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        // Bumped alpha 0.55 → 0.72 to compensate for the lost blur.
-        color: const Color.fromRGBO(20, 20, 28, 0.72),
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.white.withValues(alpha: 0.10),
-            Colors.transparent,
-          ],
-          stops: const [0.0, 0.25],
+    return Center(
+      child: Container(
+        width: 36,
+        height: 5,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.32),
+          borderRadius: BorderRadius.circular(3),
         ),
-        boxShadow: const [
-          BoxShadow(
-            color: Color.fromRGBO(0, 0, 0, 0.55),
-            blurRadius: 60,
-            offset: Offset(0, 24),
+      ),
+    );
+  }
+}
+
+/// "PLAYING FROM ALBUM · *Name*" line above the artwork. Reads the
+/// song's album / artist; falls back to "PLAYING FROM YOUR LIBRARY".
+class _SourceEyebrow extends StatelessWidget {
+  const _SourceEyebrow({required this.song});
+  final dynamic song;
+
+  @override
+  Widget build(BuildContext context) {
+    final eyebrow = song.album != null
+        ? 'PLAYING FROM ALBUM'
+        : 'PLAYING FROM YOUR LIBRARY';
+    final name = song.album ?? song.artist ?? '';
+    return Column(
+      children: [
+        Text(
+          eyebrow,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.6,
+            color: Colors.white.withValues(alpha: 0.55),
           ),
-        ],
-      ),
+        ),
+        if (name.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                PlayerExpansionScope.maybeRead(context)?.collapse();
+                if (song.album != null) {
+                  openAlbum(context, song.album);
+                } else {
+                  openArtist(context, song.artist);
+                }
+              },
+              child: Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
 
-/// Bare 38×38 InkWell wrapping a centred icon — used for the favorite
-/// and more_vert buttons inside the album card's artist row. No glass
-/// pill behind the icon; the buttons just sit in the card's content.
-class _InlineIconButton extends StatelessWidget {
-  const _InlineIconButton({
-    required this.icon,
-    required this.iconSize,
-    required this.color,
-    required this.onTap,
+/// Left-aligned title + artist with a trailing "…" button. Font sizes
+/// lerp down as the player flips to lyrics mode so the row stays
+/// proportionate next to the small album-art thumbnail.
+class _TitleRow extends StatelessWidget {
+  const _TitleRow({
+    required this.song,
+    required this.lyricsValue,
+    required this.onMore,
   });
-  final IconData icon;
-  final double iconSize;
-  final Color color;
-  final VoidCallback onTap;
+
+  final dynamic song;
+  final double lyricsValue;
+  final VoidCallback onMore;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: onTap,
-        child: SizedBox(
-          width: 38,
-          height: 38,
-          child: Icon(icon, size: iconSize, color: color),
+    final titleSize = ui.lerpDouble(22, 16, lyricsValue)!;
+    final artistSize = ui.lerpDouble(15, 12, lyricsValue)!;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                song.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: titleSize,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.4,
+                  color: Colors.white,
+                  height: 1.15,
+                ),
+              ),
+              if (song.artist != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {
+                      PlayerExpansionScope.maybeRead(context)?.collapse();
+                      openArtist(context, song.artist);
+                    },
+                    child: Text(
+                      song.artist!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: artistSize,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white.withValues(alpha: 0.65),
+                        height: 1.2,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
-      ),
+        _GlyphButton(
+          icon: Icons.more_horiz_rounded,
+          size: 28,
+          color: Colors.white.withValues(alpha: 0.75),
+          onTap: onMore,
+        ),
+      ],
     );
   }
 }
 
-/// Niche bar — Tune (inactive placeholder) | Lyrics pill | Queue. Tune
-/// is a hook for the bass-tweaks panel from the Lumen design; it stays
-/// inactive until that surface is wired up. The Lyrics pill takes the
-/// flex space between the two glyphs.
-class _NicheBar extends StatelessWidget {
-  const _NicheBar({
-    required this.accent,
-    required this.onTune,
-    required this.onLyrics,
-    required this.onQueue,
-  });
-
+/// Slim Apple-style scrubber — thin track, small thumb that grows on drag,
+/// monotype time labels below. While AutoMix is blending two tracks the bar
+/// glows pink and the labels cross-fade to "Mixing".
+class _SlimScrubber extends ConsumerStatefulWidget {
+  const _SlimScrubber({required this.accent});
   final Color accent;
-  final VoidCallback onTune;
-  final VoidCallback onLyrics;
-  final VoidCallback onQueue;
+
+  @override
+  ConsumerState<_SlimScrubber> createState() => _SlimScrubberState();
+}
+
+class _SlimScrubberState extends ConsumerState<_SlimScrubber>
+    with SingleTickerProviderStateMixin {
+  // While dragging, hold the scrubbed position locally and DON'T seek —
+  // playback keeps going at the live spot; the seek commits on release.
+  double? _dragMs;
+
+  // Drives the "mixing" glow: a gentle pink pulse while a transition runs,
+  // eased back to 0 when it ends.
+  late final AnimationController _glow;
+
+  @override
+  void initState() {
+    super.initState();
+    _glow = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    );
+  }
+
+  @override
+  void dispose() {
+    _glow.dispose();
+    super.dispose();
+  }
+
+  void _onMixingChanged(bool mixing) {
+    if (mixing) {
+      _glow.repeat(min: 0.4, max: 1.0, reverse: true);
+    } else {
+      _glow.stop();
+      _glow.animateTo(
+        0,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOut,
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 22),
-      child: Row(
-        children: [
-          _NicheGlyph(
-            icon: Icons.tune_rounded,
-            onTap: onTune,
-            active: false,
-          ),
-          const SizedBox(width: 18),
-          _LyricsPill(accent: accent, onTap: onLyrics),
-          const SizedBox(width: 18),
-          _NicheGlyph(
-            icon: Icons.queue_music_rounded,
-            onTap: onQueue,
-          ),
-        ],
-      ),
-    );
-  }
-}
+    ref.listen<bool>(autoMixMixingProvider, (_, next) => _onMixingChanged(next));
+    final mixing = ref.watch(autoMixMixingProvider);
 
-class _FullProgress extends ConsumerWidget {
-  const _FullProgress();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
     final position =
         ref.watch(playerPositionProvider).valueOrNull ?? Duration.zero;
     final duration =
         ref.watch(playerDurationProvider).valueOrNull ?? Duration.zero;
     final hasDuration = duration > Duration.zero;
-    final maxMs =
-        duration.inMilliseconds.toDouble().clamp(1.0, double.infinity);
-    final valueMs =
-        position.inMilliseconds.clamp(0, duration.inMilliseconds).toDouble();
+    final maxMs = duration.inMilliseconds.toDouble().clamp(1.0, double.infinity);
+    final liveMs = position.inMilliseconds
+        .clamp(0, duration.inMilliseconds)
+        .toDouble();
+    final valueMs = (_dragMs ?? liveMs).clamp(0.0, maxMs);
+    final shownPos = Duration(milliseconds: valueMs.toInt());
+
+    final labelStyle = TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: Colors.white.withValues(alpha: 0.55),
+      fontFeatures: LumenTokens.tnum,
+    );
+
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        SliderTheme(
-          data: SliderTheme.of(context).copyWith(
-            activeTrackColor: Colors.white.withValues(alpha: 0.85),
-            inactiveTrackColor: Colors.white.withValues(alpha: 0.18),
-            thumbColor: Colors.white,
-            trackHeight: 4,
-            thumbShape:
-                const RoundSliderThumbShape(enabledThumbRadius: 6),
-            overlayShape:
-                const RoundSliderOverlayShape(overlayRadius: 14),
-          ),
-          child: Slider(
-            min: 0,
-            max: maxMs,
-            value: valueMs,
-            onChanged: hasDuration
-                ? (v) => ref
-                    .read(nowPlayingProvider.notifier)
-                    .seek(Duration(milliseconds: v.toInt()))
-                : null,
-          ),
+        AnimatedBuilder(
+          animation: _glow,
+          builder: (context, _) {
+            final g = _glow.value; // 0 (idle) → 1 (peak glow)
+            final trackColor = Color.lerp(
+              Colors.white.withValues(alpha: 0.85),
+              LumenTokens.accent,
+              g,
+            )!;
+            return DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: g > 0.02
+                    ? [
+                        BoxShadow(
+                          color: LumenTokens.accent.withValues(alpha: 0.32 * g),
+                          blurRadius: 6 + 16 * g,
+                          spreadRadius: 0.5 * g,
+                        ),
+                      ]
+                    : null,
+              ),
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  activeTrackColor: trackColor,
+                  inactiveTrackColor: Colors.white.withValues(alpha: 0.18),
+                  thumbColor: Colors.white,
+                  trackHeight: 3,
+                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+                  overlayShape: const RoundSliderOverlayShape(
+                    overlayRadius: 12,
+                  ),
+                ),
+                child: Slider(
+                  min: 0,
+                  max: maxMs,
+                  value: valueMs,
+                  onChanged: hasDuration
+                      ? (v) => setState(() => _dragMs = v)
+                      : null,
+                  onChangeEnd: hasDuration
+                      ? (v) {
+                          ref
+                              .read(nowPlayingProvider.notifier)
+                              .seek(Duration(milliseconds: v.toInt()));
+                          setState(() => _dragMs = null);
+                        }
+                      : null,
+                ),
+              ),
+            );
+          },
         ),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                _formatDuration(position),
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white.withValues(alpha: 0.6),
-                ),
-              ),
-              Text(
-                '-${_formatDuration(duration - position)}',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white.withValues(alpha: 0.6),
-                ),
-              ),
-            ],
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 280),
+            child: mixing
+                ? const Row(
+                    key: ValueKey('mixing'),
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.auto_awesome_rounded,
+                        size: 13,
+                        color: LumenTokens.accent,
+                      ),
+                      SizedBox(width: 6),
+                      Text(
+                        'Mixing',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: LumenTokens.accent,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ],
+                  )
+                : Row(
+                    key: const ValueKey('times'),
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(_formatDuration(shownPos), style: labelStyle),
+                      Text(
+                        '-${_formatDuration(duration - shownPos)}',
+                        style: labelStyle,
+                      ),
+                    ],
+                  ),
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Horizontal volume slider bracketed by speaker.min/speaker.max
+/// glyphs — drives system volume via the volume_controller plugin so
+/// the iPhone's hardware volume keys stay in sync with the slider.
+class _VolumeRow extends StatefulWidget {
+  const _VolumeRow();
+
+  @override
+  State<_VolumeRow> createState() => _VolumeRowState();
+}
+
+class _VolumeRowState extends State<_VolumeRow> {
+  @override
+  void initState() {
+    super.initState();
+    // Read the current system volume so the thumb starts in the right
+    // place. We deliberately do NOT register volume_controller's listener
+    // — it deactivates the shared AVAudioSession on teardown (stopping
+    // SoLoud on collapse) and forces `.mixWithOthers` (dropping the
+    // lock-screen now-playing widget). See [VolumeService].
+    VolumeService.instance.refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dim = Colors.white.withValues(alpha: 0.55);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Icon(Icons.volume_down_rounded, size: 20, color: dim),
+        Expanded(
+          child: ValueListenableBuilder<double>(
+            valueListenable: VolumeService.instance.volume,
+            builder: (context, volume, _) => SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                activeTrackColor: Colors.white.withValues(alpha: 0.75),
+                inactiveTrackColor: Colors.white.withValues(alpha: 0.18),
+                thumbColor: Colors.white,
+                trackHeight: 3,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+              ),
+              child: Slider(
+                min: 0,
+                max: 1,
+                value: volume.clamp(0.0, 1.0),
+                onChanged: VolumeService.instance.setVolume,
+              ),
+            ),
+          ),
+        ),
+        Icon(Icons.volume_up_rounded, size: 22, color: dim),
+      ],
+    );
+  }
+}
+
+/// Three equally-spaced glyph buttons — Lyrics · Connect · Queue.
+/// Lyrics (left) toggles the inline lyrics surface; Connect (middle) opens
+/// the Live Connect device picker; Queue (right) toggles the inline up-next
+/// surface. Shuffle / repeat / infinity now live in the queue surface's
+/// control strip, so they're no longer here.
+class _ActionsRow extends ConsumerWidget {
+  const _ActionsRow({
+    required this.accent,
+    required this.lyricsActive,
+    required this.queueActive,
+    required this.onToggleLyrics,
+    required this.onToggleQueue,
+  });
+
+  final Color accent;
+  final bool lyricsActive;
+  final bool queueActive;
+  final VoidCallback onToggleLyrics;
+  final VoidCallback onToggleQueue;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final dim = Colors.white.withValues(alpha: 0.72);
+    final onAnother = ref.watch(
+      connectServiceProvider.select((c) => c.activeRemote != null),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 44),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          // Lyrics (left) — Apple-Music-style quote-bubble glyph.
+          _GlyphButton(
+            icon: Icons.lyrics_rounded,
+            size: 28,
+            color: lyricsActive ? accent : dim,
+            onTap: onToggleLyrics,
+          ),
+          // Connect (middle) — hand playback to / pull it from another device.
+          _GlyphButton(
+            icon: onAnother ? Icons.cast_connected : Icons.cast,
+            size: 26,
+            color: onAnother ? accent : dim,
+            onTap: () => showConnectSheet(context),
+          ),
+          // Queue (right) — toggles the inline up-next surface.
+          _GlyphButton(
+            icon: Icons.queue_music_rounded,
+            size: 28,
+            color: queueActive ? accent : dim,
+            onTap: onToggleQueue,
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1217,252 +1954,4 @@ String _formatDuration(Duration d) {
   final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
   final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
   return '$m:$s';
-}
-
-/// Glass icon circle (38×38) used in the top chrome — matches the Lumen
-/// design system's `IconCircle`. Previously used a BackdropFilter with
-/// σ=18 blur to read as live glass; that meant every visible round-icon
-/// + the lyrics pill + the niche glyphs (5–6 of them at full mode)
-/// each forced a saveLayer per frame, which on most Android devices
-/// was the dominant per-frame cost on the full player. Switched to a
-/// solid translucent fill with the same dark tint + top-edge gradient
-/// + 1 px white border; the visual difference is small (the lit bloom
-/// behind no longer warps through the circle, but the cover is mostly
-/// dark anyway) and the saveLayers are gone.
-class _RoundIcon extends StatelessWidget {
-  const _RoundIcon({
-    required this.icon,
-    required this.onTap,
-    this.tint,
-    this.size = 38,
-    this.iconSize = 18,
-  });
-  final IconData icon;
-  final VoidCallback? onTap;
-  final Color? tint;
-  final double size;
-  final double iconSize;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: size,
-      height: size,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(999),
-          onTap: onTap,
-          child: Container(
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              // Static dark fill — bumped alpha 0.55 → 0.72 to compensate
-              // for the lost blur (the blur used to darken the bg under
-              // the circle by itself).
-              color: const Color.fromRGBO(20, 20, 28, 0.72),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.18),
-              ),
-              // Top-edge highlight to fake an inset white shadow.
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.white.withValues(alpha: 0.10),
-                  Colors.transparent,
-                ],
-                stops: const [0.0, 0.5],
-              ),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color.fromRGBO(0, 0, 0, 0.35),
-                  blurRadius: 24,
-                  offset: Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Icon(
-              icon,
-              size: iconSize,
-              color: tint ?? Colors.white,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Larger glass circle (50×50) used in the niche bar's `Tune` and
-/// `Queue` slots. Same construction as [_RoundIcon] but sized up and
-/// with a 28 px glyph.
-class _NicheGlyph extends StatelessWidget {
-  const _NicheGlyph({
-    required this.icon,
-    required this.onTap,
-    this.active = true,
-  });
-  final IconData icon;
-  final VoidCallback? onTap;
-  final bool active;
-
-  @override
-  Widget build(BuildContext context) {
-    return _RoundIcon(
-      icon: icon,
-      onTap: active ? onTap : null,
-      size: 50,
-      iconSize: 28,
-      tint: active
-          ? Colors.white.withValues(alpha: 0.92)
-          : Colors.white.withValues(alpha: 0.45),
-    );
-  }
-}
-
-/// Wide glass pill used as the centerpiece of the niche bar. The
-/// `Lyrics` button — text-only, accent-coloured, expanded to fill the
-/// space between the two niche glyphs.
-class _LyricsPill extends StatelessWidget {
-  const _LyricsPill({required this.accent, required this.onTap});
-  final Color accent;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    // Same swap as _RoundIcon: dropped the BackdropFilter(σ=18). The
-    // pill is the centerpiece of the niche bar so its glass look mattered
-    // a bit more than the round icons, but at full mode it sits on a
-    // mostly-dark portion of the bloom; a static dark fill at higher
-    // alpha is visually indistinguishable from the live-blurred version
-    // and saves one more saveLayer per frame.
-    return Expanded(
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(999),
-          onTap: onTap,
-          child: Container(
-            height: 50,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: const Color.fromRGBO(20, 20, 28, 0.70),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.16),
-              ),
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.white.withValues(alpha: 0.08),
-                  Colors.transparent,
-                ],
-                stops: const [0.0, 0.5],
-              ),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color.fromRGBO(0, 0, 0, 0.35),
-                  blurRadius: 24,
-                  offset: Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Text(
-              'Lyrics',
-              style: TextStyle(
-                color: accent,
-                fontSize: 14,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 0.2,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Title text that shrinks 30 → 18 to fit on a single line — matches
-/// the Lumen handoff's `FitTitle`. Uses TextPainter to measure each
-/// candidate size; first one that fits wins.
-///
-/// Previously this re-ran up to 12 `TextPainter.layout()` calls on every
-/// build, which meant during a player-expansion drag (the parent
-/// rebuilds on every animation tick) it was doing ~720 text layouts a
-/// second for an unchanged title. Cached now on `(text, maxWidth)` so
-/// the measure runs only when one of those actually changes.
-class _FitTitle extends StatefulWidget {
-  const _FitTitle({required this.text});
-  final String text;
-
-  @override
-  State<_FitTitle> createState() => _FitTitleState();
-}
-
-class _FitTitleState extends State<_FitTitle> {
-  String? _measuredText;
-  double? _measuredWidth;
-  double _chosen = 18.0;
-
-  double _measure(String text, double maxWidth) {
-    if (text == _measuredText && maxWidth == _measuredWidth) return _chosen;
-    var chosen = 18.0;
-    for (var size = 30.0; size > 18.0; size -= 1.0) {
-      final tp = TextPainter(
-        text: TextSpan(
-          text: text,
-          style: TextStyle(
-            fontSize: size,
-            fontWeight: FontWeight.w900,
-            letterSpacing: -0.8,
-            height: 1.08,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-        maxLines: 1,
-      )..layout();
-      if (tp.width <= maxWidth) {
-        chosen = size;
-        tp.dispose();
-        break;
-      }
-      tp.dispose();
-    }
-    _measuredText = text;
-    _measuredWidth = maxWidth;
-    _chosen = chosen;
-    return chosen;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final chosen = _measure(widget.text, constraints.maxWidth);
-        return Text(
-          widget.text,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: chosen,
-            fontWeight: FontWeight.w900,
-            letterSpacing: -0.8,
-            height: 1.08,
-            color: Colors.white,
-          ),
-        );
-      },
-    );
-  }
-}
-
-// Suppress unused-import warnings for symbols only referenced in
-// commented-out code paths during the migration.
-// ignore: unused_element
-void _keepImports() {
-  HapticFeedback.lightImpact();
-  AlbumColors.fallback;
 }

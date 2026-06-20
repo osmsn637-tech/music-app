@@ -40,7 +40,13 @@ dependencies:
   # off the audio mix (drives the bass-reactive fluid background) and
   # mix multiple sources for the AI-DJ crossfade without juggling two
   # AudioPlayer instances.
-  flutter_soloud: ^3.1.10
+  # Pinned to 3.4.x: audio_flux needs >=3.4.10, and 4.0 made play() sync
+  # (breaking). No 3.1→3.4 API changes touch PlayerService.
+  flutter_soloud: ^3.4.10
+  # GPU audio-reactive visualizer (waveform / FFT / shader) by the
+  # flutter_soloud author — reads the same SoLoud.instance mix the player
+  # drives, so it visualises live playback with no extra capture layer.
+  audio_flux: ^1.2.2
   # audio_service still owns the lockscreen / Bluetooth / media-button
   # bridge. The handler proxies its callbacks to our PlayerService
   # (which now wraps SoLoud).
@@ -56,6 +62,14 @@ dependencies:
 
   # Networking
   dio: ^5.7.0
+  # Live Connect — real-time cross-device playback handoff (WebSocket client).
+  web_socket_channel: ^3.0.1
+  # Stable per-install device id for Live Connect pairing.
+  uuid: ^4.5.1
+
+  # Desktop window control — drives the macOS floating mini-player
+  # (resize / always-on-top / hide title bar / drag-to-move).
+  window_manager: ^0.4.3
 
   # Local database (Phase 2 — pulled in now so build_runner is wired)
   drift: ^2.20.3
@@ -79,6 +93,14 @@ dependencies:
   # Material container-transform for the player's Lyrics button →
   # full lyrics page morph (and reverse on back).
   animations: ^2.0.11
+
+  # iOS-26 "Liquid Glass" surfaces (real refraction + specular) used for
+  # the mini/full player chrome. Cross-platform (Impeller on mobile,
+  # lightweight shader fallback on Windows/web).
+  liquid_glass_widgets: ^0.16.1
+
+  # System volume read/write for the iOS-26-style player volume slider.
+  volume_controller: ^3.3.3
 
 dev_dependencies:
   flutter_test:
@@ -124,6 +146,15 @@ flutter:
     - assets/dj_voice_bank/
     - assets/quick_pick_bg/
     - assets/icon/flacko_logo.png
+    # AutoMix analysis sidecars (*.automix.json) — bundled so the engine has
+    # beat/key/cue data on every platform; copied into app-support on first
+    # launch (see automix/runtime/sidecar_seeder.dart).
+    - assets/automix_analysis/
+    # Dev-seed sample audio / cover art / lyrics (debug-only). Empty by
+    # default; drop files matching the slugs in
+    # assets/sample_songs/README.txt and the bug-icon seed will pick
+    # them up.
+    - assets/sample_songs/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

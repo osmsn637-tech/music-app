@@ -1,0 +1,10 @@
+README.md
+docker-compose.yml
+import/
+importer/
+repair/
+scripts/
+voices/
+library.csv
+**/.DS_Store
+**/*.bak

@@ -51,6 +51,31 @@ class PlaylistRepository {
         .write(PlaylistsCompanion(name: Value(name)));
   }
 
+  /// Clone a playlist (name + " copy") with the same songs in order.
+  Future<String> duplicate(String playlistId) async {
+    final src = await findById(playlistId);
+    if (src == null) return playlistId;
+    final newId = await create('${src.name} copy');
+    final rows = await (_db.select(_db.playlistSongs)
+          ..where((ps) => ps.playlistId.equals(playlistId))
+          ..orderBy([(ps) => OrderingTerm(expression: ps.position)]))
+        .get();
+    await _db.batch((b) {
+      for (var i = 0; i < rows.length; i++) {
+        b.insert(
+          _db.playlistSongs,
+          PlaylistSongsCompanion.insert(
+            playlistId: newId,
+            songId: rows[i].songId,
+            position: i,
+          ),
+          mode: InsertMode.insertOrIgnore,
+        );
+      }
+    });
+    return newId;
+  }
+
   Future<void> delete(String id) async {
     await _db.transaction(() async {
       await (_db.delete(_db.playlistSongs)

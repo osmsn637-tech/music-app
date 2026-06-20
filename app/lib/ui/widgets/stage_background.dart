@@ -33,11 +33,11 @@ class _StageBackgroundState extends State<StageBackground>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final exp = PlayerExpansionScope.read(context);
+    final exp = PlayerExpansionScope.maybeRead(context);
     if (!identical(exp, _expansion)) {
       _expansion?.removeListener(_recomputeCovered);
       _expansion = exp;
-      _expansion!.addListener(_recomputeCovered);
+      _expansion?.addListener(_recomputeCovered);
     }
     final route = ModalRoute.of(context);
     if (!identical(route, _route)) {
@@ -87,43 +87,43 @@ class _StageBackgroundState extends State<StageBackground>
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final purple =
-        isLight ? LumenTokens.lightBlobPurple : LumenTokens.blobPurple;
-    final pink = isLight ? LumenTokens.lightBlobPink : LumenTokens.blobPink;
     final base = isLight ? LumenTokens.lightStageBg : LumenTokens.stageBg;
-    final blobOpacity = isLight ? 0.5 : 0.35;
 
     return Container(
       color: base,
       child: Stack(
         children: [
-          AnimatedBuilder(
-            animation: Listenable.merge([_drift1, _drift2]),
-            builder: (context, _) {
-              return Stack(
-                children: [
-                  Positioned.fill(
-                    child: _Blob(
-                      color: purple,
-                      opacity: blobOpacity,
-                      driftX: _drift1.value,
-                      driftY: _drift1.value,
-                      anchor: Alignment.topLeft,
+          // Day/light mode is a flat neutral stage — the drifting colour
+          // blobs only run in dark mode, where they read as ambient glow
+          // instead of a washed-out pastel gradient.
+          if (!isLight)
+            AnimatedBuilder(
+              animation: Listenable.merge([_drift1, _drift2]),
+              builder: (context, _) {
+                return Stack(
+                  children: [
+                    Positioned.fill(
+                      child: _Blob(
+                        color: LumenTokens.blobPurple,
+                        opacity: 0.35,
+                        driftX: _drift1.value,
+                        driftY: _drift1.value,
+                        anchor: Alignment.topLeft,
+                      ),
                     ),
-                  ),
-                  Positioned.fill(
-                    child: _Blob(
-                      color: pink,
-                      opacity: blobOpacity,
-                      driftX: 1 - _drift2.value,
-                      driftY: 1 - _drift2.value,
-                      anchor: Alignment.bottomRight,
+                    Positioned.fill(
+                      child: _Blob(
+                        color: LumenTokens.blobPink,
+                        opacity: 0.35,
+                        driftX: 1 - _drift2.value,
+                        driftY: 1 - _drift2.value,
+                        anchor: Alignment.bottomRight,
+                      ),
                     ),
-                  ),
-                ],
-              );
-            },
-          ),
+                  ],
+                );
+              },
+            ),
           if (widget.child != null) widget.child!,
         ],
       ),

@@ -1,11 +1,17 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../features/connect/providers.dart';
+import '../../features/nav/content_navigator_scope.dart';
+import '../../features/nav/nav_collapse_controller.dart';
+import '../motion/fade_indexed_stack.dart';
 import '../../features/player/now_playing_controller.dart';
 import '../../features/player/player_expansion_controller.dart';
+import '../theme/app_theme.dart';
 import '../widgets/expanding_player.dart';
-import '../widgets/glass_tab_bar.dart';
+import '../widgets/liquid_nav_bar.dart';
 import '../widgets/profile_sheet.dart';
 import '../widgets/stage_background.dart';
 import 'ai_dj_screen.dart';
@@ -14,43 +20,56 @@ import 'home_shell_providers.dart';
 import 'library_screen.dart';
 import 'search_screen.dart';
 
-/// Tab-bar visual height (excluding the bottom safe-area inset). Matches
-/// the GlassTabBar's intrinsic height — kept here as a constant because
-/// the ExpandingPlayer needs to know it to compute the mini rect's top.
-const double kHomeShellTabBarHeight = 66;
+/// Tab indices on [homeTabIndexProvider]. Kept stable: legacy callers
+/// (Home's "Start Station" feature card, deep links into Search /
+/// Library) still set the index directly, so reshuffling would break
+/// them. Search is rendered as a separate button on the floating nav
+/// rather than inside the tab pill — the indices don't reflect the
+/// visual order anymore, only the IndexedStack page order.
+const _kHomeTab = 0;
+const _kFlackoTab = 1;
+const _kSearchTab = 2;
+const _kLibraryTab = 3;
+
+/// The three slots that live inside the floating nav's tab pill, in
+/// display order. The Search tab lives outside the pill (rendered as a
+/// separate button), so it's intentionally absent here.
+const _kPillTabIndices = [_kHomeTab, _kFlackoTab, _kLibraryTab];
 
 class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
 
-  static const _tabs = [
-    TabSpec(
+  static const _pillTabs = [
+    NavTabSpec(
       icon: Icons.home_outlined,
       activeIcon: Icons.home_rounded,
       label: 'Home',
     ),
-    TabSpec(
+    NavTabSpec(
       icon: Icons.auto_awesome_outlined,
       activeIcon: Icons.auto_awesome,
       label: 'Flacko',
       accent: true,
     ),
-    TabSpec(
-      icon: Icons.search,
-      activeIcon: Icons.search,
-      label: 'Search',
-    ),
-    TabSpec(
+    NavTabSpec(
       icon: Icons.library_music_outlined,
       activeIcon: Icons.library_music_rounded,
       label: 'Library',
     ),
   ];
 
+  static const _searchTab = NavTabSpec(
+    icon: Icons.search,
+    activeIcon: Icons.search,
+    label: 'Search',
+  );
+
   @override
   ConsumerState<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends ConsumerState<HomeShell> {
+class _HomeShellState extends ConsumerState<HomeShell>
+    with SingleTickerProviderStateMixin {
   static const _pages = <Widget>[
     HomeScreen(),
     AiDjScreen(),
@@ -58,131 +77,238 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     LibraryScreen(),
   ];
 
+  late final NavCollapseController _navCollapse;
+
+  /// True once the list has settled at the very top while collapsed. The
+  /// nav doesn't unwind the instant it reaches the top — it arms here, and
+  /// the *next* upward swipe at the top is what actually expands it.
+  bool _topArmed = false;
+
+  /// Inner Navigator for the content area. Detail pages (album/artist/
+  /// playlist) push HERE rather than on the root navigator, so the floating
+  /// nav bar + mini player (later siblings in the body Stack) keep painting
+  /// over them and stay usable on every browse page.
+  final GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
+
+  /// True whenever the inner Navigator has a route above its root. Drives the
+  /// back-button priority; kept fresh by [_innerNavObserver].
+  final ValueNotifier<bool> _hasInnerRoute = ValueNotifier<bool>(false);
+  late final _InnerNavObserver _innerNavObserver;
+
+  @override
+  void initState() {
+    super.initState();
+    _navCollapse = NavCollapseController(vsync: this);
+    _innerNavObserver = _InnerNavObserver(_syncInnerDepth);
+    // Restore the previous session (song + queue + position), staged
+    // paused, so the app comes up where the user left off.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        ref.read(nowPlayingProvider.notifier).restoreSession();
+      }
+    });
+  }
+
+  void _syncInnerDepth() {
+    // ValueNotifier no-ops when the value is unchanged, so the initial root
+    // push (false → false) can't trip a setState-during-build.
+    _hasInnerRoute.value = _contentNavKey.currentState?.canPop() ?? false;
+  }
+
+  @override
+  void dispose() {
+    _hasInnerRoute.dispose();
+    _navCollapse.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasNowPlaying = ref.watch(nowPlayingProvider) != null;
     final index = ref.watch(homeTabIndexProvider);
-    final navVisible = ref.watch(navVisibleProvider);
+    // Keep the Live Connect socket alive so this phone can be handed playback.
+    ref.watch(connectServiceProvider.notifier);
+
+    // Map the home-shell tab index → pill slot (-1 when on Search, which
+    // doesn't live in the pill).
+    final pillIndex = _kPillTabIndices.indexOf(index);
+    final searchActive = index == _kSearchTab;
+
+    void selectPillSlot(int slot) {
+      // Tapping a tab lands on its root — drop any open detail page first.
+      _contentNavKey.currentState?.popUntil((r) => r.isFirst);
+      final target = _kPillTabIndices[slot];
+      ref.read(homeTabIndexProvider.notifier).state = target;
+      _navCollapse.expand();
+    }
+
+    void selectSearch() {
+      _contentNavKey.currentState?.popUntil((r) => r.isFirst);
+      ref.read(homeTabIndexProvider.notifier).state = _kSearchTab;
+      _navCollapse.expand();
+    }
 
     final scaffold = Scaffold(
-        backgroundColor: Colors.transparent,
-        extendBodyBehindAppBar: true,
-        extendBody: true,
-        body: Stack(
-          children: [
-            // Transparent Material wrapper around every tab body so each
-            // screen — and every InkWell / IconButton / SongTile inside —
-            // has a guaranteed Material ancestor regardless of what
-            // BackdropFilters, Stacks, or Glass surfaces sit between them.
-            //
-            // IndexedStack instead of PageView: tab switching is now tap-
-            // only (no swipe-between-tabs), so we don't need a Scrollable
-            // here. Removing the PageView also removes a gesture-arena
-            // participant that was competing with the inner ListView's
-            // vertical drags — vertical scrolling inside any tab is
-            // unblocked across the full body.
-            Positioned.fill(
-              child: _OffstageWhenPlayerCovered(
-                child: Material(
-                  type: MaterialType.transparency,
-                  child: NotificationListener<ScrollNotification>(
-                    onNotification: (n) =>
-                        _handleScroll(ref, n, navVisible: navVisible),
-                    child: IndexedStack(
-                      index: index,
-                      children: _pages,
-                    ),
+      backgroundColor: Colors.transparent,
+      extendBodyBehindAppBar: true,
+      extendBody: true,
+      body: Stack(
+        children: [
+          // Transparent Material wrapper around every tab body so each
+          // screen — and every InkWell / IconButton / SongTile inside —
+          // has a guaranteed Material ancestor regardless of what
+          // BackdropFilters, Stacks, or Glass surfaces sit between them.
+          //
+          // IndexedStack instead of PageView: tab switching is now tap-
+          // only (no swipe-between-tabs), so we don't need a Scrollable
+          // here.
+          Positioned.fill(
+            child: _OffstageWhenPlayerCovered(
+              child: Material(
+                type: MaterialType.transparency,
+                // Inner Navigator: the tabs are its root route; detail pages
+                // push on top WITHIN this content area, while the nav + mini
+                // player (later siblings below) keep painting over them.
+                child: Navigator(
+                  key: _contentNavKey,
+                  observers: [_innerNavObserver],
+                  onGenerateRoute: (settings) => MaterialPageRoute(
+                    settings: settings,
+                    builder: (_) =>
+                        _TabHost(pages: _pages, onScroll: _handleScroll),
                   ),
                 ),
               ),
             ),
-            // Top-right profile button overlay — also fades with the nav so
-            // a fully scrolled feed is uninterrupted.
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 12,
-              right: 16,
-              child: AnimatedOpacity(
-                opacity: navVisible ? 1 : 0,
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOut,
-                child: IgnorePointer(
-                  ignoring: !navVisible,
-                  child: _ProfileButton(),
+          ),
+          // Top-right profile button. Fades with the nav collapse so a
+          // fully scrolled feed reads cleanly.
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 12,
+            right: 16,
+            child: AnimatedBuilder(
+              animation: _navCollapse.animation,
+              builder: (context, child) {
+                final opacity = (1.0 - _navCollapse.value * 1.4).clamp(
+                  0.0,
+                  1.0,
+                );
+                return Opacity(
+                  opacity: opacity,
+                  child: IgnorePointer(ignoring: opacity < 0.05, child: child),
+                );
+              },
+              child: _ProfileButton(),
+            ),
+          ),
+          // Floating nav — tab pill + separate search button.
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: LiquidNavBar(
+              tabs: HomeShell._pillTabs,
+              activePillIndex: pillIndex,
+              onTabSelected: selectPillSlot,
+              search: HomeShell._searchTab,
+              searchActive: searchActive,
+              onSearch: selectSearch,
+              onExpandRequest: _navCollapse.expand,
+            ),
+          ),
+          // Unified mini/full player. Sits on top of everything in
+          // the home shell so the full-form fully covers the nav at
+          // e=1, while the mini-form lerps between its at-rest row
+          // and the inline slot beside the tab pill / search button.
+          // Mini player fades + rises in on the first song (and sinks out
+          // when playback clears). Keyed on presence only, so a song change
+          // while it's already visible never re-animates it.
+          Positioned.fill(
+            child: AnimatedSwitcher(
+              duration: LumenTokens.mBase,
+              switchInCurve: LumenTokens.lumenDecelerate,
+              switchOutCurve: LumenTokens.lumenAccelerate,
+              transitionBuilder: (child, anim) => FadeTransition(
+                opacity: anim,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0, 0.06),
+                    end: Offset.zero,
+                  ).animate(anim),
+                  child: child,
                 ),
               ),
+              child: hasNowPlaying
+                  ? const ExpandingPlayer(key: ValueKey('player'))
+                  : const SizedBox.shrink(key: ValueKey('noplayer')),
             ),
-            // Sticky tab bar — always visible regardless of scroll
-            // direction. The expanding player overlays on top of it
-            // when the user opens the player, so the tab bar can
-            // safely stay anchored here.
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: GlassTabBar(
-                tabs: HomeShell._tabs,
-                activeIndex: index,
-                onChanged: (i) =>
-                    ref.read(homeTabIndexProvider.notifier).state = i,
-              ),
-            ),
-            // Unified mini/full player. Sits on top of everything in
-            // the home shell so the full-form fully covers the tab
-            // bar at e=1, while the mini-form (e=0) floats just above
-            // the tab bar. Owns its own gesture handling for
-            // tap-to-expand and drag-to-collapse.
-            if (hasNowPlaying)
-              Positioned.fill(
-                child: ExpandingPlayer(
-                  tabBarHeight: kHomeShellTabBarHeight,
-                ),
-              ),
-          ],
-        ),
-      );
+          ),
+        ],
+      ),
+    );
 
     final shell = StageBackground(child: scaffold);
 
-    // Hosts the AnimationController behind PlayerExpansionScope.of(...) /
-    // .read(...) calls from the entire subtree. Wrapping at this level
-    // means every tab (Home, Search, Library, Playlist detail, AI DJ)
-    // can call `.expand()` to open the player without pushing a route.
-    //
-    // _ShellBackHandler sits inside the scope so it can subscribe to the
-    // expansion controller and provide a fully reactive PopScope — one
-    // that updates canPop both when Riverpod providers change (tab index)
-    // AND when the animation crosses the expanded/mini threshold.
-    return PlayerExpansionScope(
-      child: _ShellBackHandler(
-        tabIndex: index,
-        onGoHome: () =>
-            ref.read(homeTabIndexProvider.notifier).state = 0,
-        child: shell,
+    // Hosts the AnimationController behind PlayerExpansionScope.of(...)
+    // / .read(...) for the entire subtree, and wraps it in the nav-
+    // collapse scope so the mini-player and the nav share one source
+    // of truth for the collapsed↔expanded morph.
+    return NavCollapseScope(
+      controller: _navCollapse,
+      child: PlayerExpansionScope(
+        child: ContentNavigatorScope(
+          navKey: _contentNavKey,
+          child: _ShellBackHandler(
+            tabIndex: index,
+            contentNavKey: _contentNavKey,
+            hasInnerRoute: _hasInnerRoute,
+            onGoHome: () =>
+                ref.read(homeTabIndexProvider.notifier).state = _kHomeTab,
+            child: shell,
+          ),
+        ),
       ),
     );
   }
 
-  bool _handleScroll(
-    WidgetRef ref,
-    ScrollNotification n, {
-    required bool navVisible,
-  }) {
-    // Snap the bar back the moment we hit the top, so a quick flick to the
-    // top doesn't leave the nav stranded off-screen.
-    if (n.metrics.pixels <= 12 && !navVisible) {
-      ref.read(navVisibleProvider.notifier).state = true;
-      return false;
-    }
-    if (n is UserScrollNotification) {
-      final dir = n.direction;
-      if (dir == ScrollDirection.reverse && navVisible) {
-        // Don't hide the bar when there's nothing to scroll into — it would
-        // just leave the user with no way to switch tabs.
-        if (n.metrics.maxScrollExtent - n.metrics.pixels > 80) {
-          ref.read(navVisibleProvider.notifier).state = false;
+  /// Scroll-driven collapse. Direction.reverse (user is scrolling down,
+  /// revealing more content) collapses the nav into the single-row inline
+  /// layout. It then *stays* collapsed through upward scrolling — and even
+  /// after reaching the top it does NOT unwind on that same gesture. Hitting
+  /// the top only *arms* it; the next upward swipe at the top is what expands
+  /// it back out. The Search tab is exempt — its pill has no active slot to
+  /// anchor a collapse around, so we leave the nav at rest there.
+  bool _handleScroll(ScrollNotification n) {
+    final tabIndex = ref.read(homeTabIndexProvider);
+    if (!_kPillTabIndices.contains(tabIndex)) return false;
+
+    final atTop = n.metrics.pixels <= 12;
+
+    if (_navCollapse.isCollapsed) {
+      if (atTop) {
+        // The gesture that carried us to the top ending is what arms it —
+        // so the unwind needs a fresh swipe, not the touch that hit the top.
+        if (n is ScrollEndNotification) {
+          _topArmed = true;
+        } else if (_topArmed &&
+            n is UserScrollNotification &&
+            n.direction == ScrollDirection.forward) {
+          _navCollapse.expand();
+          _topArmed = false;
         }
-      } else if (dir == ScrollDirection.forward && !navVisible) {
-        ref.read(navVisibleProvider.notifier).state = true;
+      } else {
+        // Scrolled away from the top → disarm.
+        _topArmed = false;
+      }
+    } else {
+      _topArmed = false;
+    }
+
+    if (n is UserScrollNotification) {
+      if (n.direction == ScrollDirection.reverse && !_navCollapse.isCollapsed) {
+        if (n.metrics.maxScrollExtent - n.metrics.pixels > 80) {
+          _navCollapse.collapse();
+        }
       }
     }
     return false;
@@ -203,8 +329,7 @@ class _ProfileButton extends StatelessWidget {
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: Colors.white.withValues(alpha: 0.1),
-            border:
-                Border.all(color: Colors.white.withValues(alpha: 0.12)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
           ),
           child: const Icon(Icons.person_rounded, size: 20),
         ),
@@ -219,10 +344,6 @@ class _ProfileButton extends StatelessWidget {
 /// static StageBackground layer) keeps its widget state but stops
 /// painting and stops accepting pointer events, so the GPU and CPU
 /// don't waste cycles on a screen the user can't see.
-///
-/// Listens directly to the controller (one cheap listener), flips the
-/// [_covered] bool via setState only when the threshold is crossed —
-/// 2 rebuilds per full expand/collapse, not 60 per second.
 class _OffstageWhenPlayerCovered extends StatefulWidget {
   const _OffstageWhenPlayerCovered({required this.child});
 
@@ -271,25 +392,23 @@ class _OffstageWhenPlayerCoveredState
 /// Handles the system back button for the home shell by wrapping its
 /// [child] in a [PopScope].
 ///
-/// Two cases are intercepted (in priority order):
-///  1. **Player expanded** — back collapses the player; stays on the
-///     current tab.
-///  2. **Non-home tab active** — back navigates to tab 0 (Home).
-///
-/// When on the Home tab with the player mini or absent the pop is
-/// allowed through so the app can exit normally.
-///
-/// Subscribes to [PlayerExpansionController] directly (same pattern as
-/// [_OffstageWhenPlayerCovered]) so [canPop] updates at the expand/
-/// collapse threshold rather than waiting for a Riverpod rebuild.
+/// Cases intercepted, in priority order:
+///  1. **Player expanded** — back collapses the player.
+///  2. **Inner detail page open** — back pops the inner content Navigator
+///     (album/artist/playlist), keeping the nav + mini player.
+///  3. **Non-home tab active** — back navigates to tab 0 (Home).
 class _ShellBackHandler extends StatefulWidget {
   const _ShellBackHandler({
     required this.tabIndex,
+    required this.contentNavKey,
+    required this.hasInnerRoute,
     required this.onGoHome,
     required this.child,
   });
 
   final int tabIndex;
+  final GlobalKey<NavigatorState> contentNavKey;
+  final ValueListenable<bool> hasInnerRoute;
   final VoidCallback onGoHome;
   final Widget child;
 
@@ -303,6 +422,19 @@ class _ShellBackHandlerState extends State<_ShellBackHandler> {
   /// True when expansion value ≥ 0.05 — the same threshold used
   /// previously in the ExpandingPlayer's PopScope.
   bool _playerExpanded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.hasInnerRoute.addListener(_onInnerRouteChanged);
+  }
+
+  void _onInnerRouteChanged() {
+    // Keep canPop fresh as the inner depth crosses 0↔1.
+    if (mounted) {
+      setState(() {});
+    }
+  }
 
   @override
   void didChangeDependencies() {
@@ -324,29 +456,69 @@ class _ShellBackHandlerState extends State<_ShellBackHandler> {
 
   @override
   void dispose() {
+    widget.hasInnerRoute.removeListener(_onInnerRouteChanged);
     _expansion?.removeListener(_onExpansionChanged);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final onHomeTab = widget.tabIndex == 0;
+    final onHomeTab = widget.tabIndex == _kHomeTab;
+    final hasInner = widget.hasInnerRoute.value;
     return PopScope(
-      // Allow the app to exit only when the player is mini/absent AND
-      // the Home tab is already active — every other state intercepts
-      // back to do the right thing first.
-      canPop: onHomeTab && !_playerExpanded,
+      canPop: onHomeTab && !_playerExpanded && !hasInner,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
         if (_playerExpanded) {
-          // Priority 1: collapse the full-screen player.
           _expansion?.collapse();
+        } else if (hasInner) {
+          widget.contentNavKey.currentState?.maybePop();
         } else if (!onHomeTab) {
-          // Priority 2: return to the Home tab.
           widget.onGoHome();
         }
       },
       child: widget.child,
     );
   }
+}
+
+/// The inner Navigator's root route — the tab pages. A ConsumerWidget so it
+/// rebuilds on tab change (watching [homeTabIndexProvider]) WITHOUT
+/// regenerating the route. The scroll listener is scoped HERE rather than
+/// around the whole inner Navigator, so only tab-page scrolls drive the nav
+/// collapse — detail-page scrolls live in sibling routes and never reach it.
+class _TabHost extends ConsumerWidget {
+  const _TabHost({required this.pages, required this.onScroll});
+
+  final List<Widget> pages;
+  final bool Function(ScrollNotification) onScroll;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final index = ref.watch(homeTabIndexProvider);
+    return NotificationListener<ScrollNotification>(
+      onNotification: onScroll,
+      child: FadeIndexedStack(index: index, children: pages),
+    );
+  }
+}
+
+/// Watches the inner Navigator's depth so the shell can keep [_hasInnerRoute]
+/// in sync for the back-button priority.
+class _InnerNavObserver extends NavigatorObserver {
+  _InnerNavObserver(this._onChanged);
+  final VoidCallback _onChanged;
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) =>
+      _onChanged();
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) =>
+      _onChanged();
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) =>
+      _onChanged();
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) =>
+      _onChanged();
 }

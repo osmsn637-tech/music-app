@@ -3,152 +3,30 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/utils/dev_seed.dart';
+import '../motion/lumen_route.dart';
+import '../motion/staggered_appear.dart';
 import '../../data/database/app_database.dart';
 import '../../data/database/providers.dart';
 import '../../features/ai_dj/providers.dart';
 import '../../features/library/artist_image_resolver.dart';
+import '../../features/library/detail_providers.dart';
 import '../../features/library/home_providers.dart';
 import '../../features/library/library_actions.dart';
-import '../../features/library/providers.dart';
+import '../../features/library/library_filters.dart';
 import '../../features/player/now_playing_controller.dart';
+import '../../features/player/providers.dart';
 import '../../features/playlists/providers.dart';
-import '../../features/search/search_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/album_art.dart';
 import '../widgets/glass.dart';
+import '../widgets/glass_kit.dart';
 import '../widgets/playlist_cover.dart';
 import '../../features/player/player_expansion_controller.dart';
 import '../widgets/song_actions.dart';
 import '../widgets/song_tile.dart';
+import 'entity_nav.dart';
 import 'home_shell_providers.dart';
 import 'playlist_detail_screen.dart';
-
-/// Albums rolled up from the songs table — one entry per (artist, album)
-/// pair, with the most-recent song's artwork used as the cover.
-class _AlbumRollup {
-  const _AlbumRollup({
-    required this.name,
-    required this.artist,
-    required this.coverPath,
-    required this.coverSeed,
-    required this.songCount,
-  });
-  final String name;
-  final String artist;
-  final String? coverPath;
-  final String coverSeed;
-  final int songCount;
-}
-
-/// Normalises an artist or album string into a stable key for grouping.
-/// Catches the most common reasons two songs that belong on the same
-/// album end up in separate buckets. The strategy is aggressive on
-/// purpose — the *key* is throwaway, only used for matching; the
-/// original strings stay intact for display, so over-stripping can
-/// only merge things, never visually change a name. Handled cases:
-///   - extra / inconsistent whitespace + case
-///   - smart quotes & en/em-dashes / unicode punctuation
-///   - ANY parenthetical / bracketed / braced content (year stamps,
-///     "[EP]", "(Single)", "(Original Motion Picture Soundtrack)" etc.
-///     are all dropped, not just a hand-picked keyword list)
-///   - leading track-number prefixes like "01 - " or "01. "
-///   - punctuation differences ("Don't" vs "Dont", "Damn." vs "Damn",
-///     "U2: Achtung Baby" vs "U2 Achtung Baby")
-///   - "feat. X" / "ft. X" / "& X" / "with X" / ", X" suffixes on the
-///     artist field
-///   - leading "The " on the artist
-String _normalizeAlbumKey(String s) {
-  var n = s.trim().toLowerCase();
-  // Smart punctuation → ASCII so a typed-by-hand title and a
-  // tag-imported one collapse before the punctuation-strip step.
-  n = n
-      .replaceAll('‘', "'")
-      .replaceAll('’', "'")
-      .replaceAll('“', '"')
-      .replaceAll('”', '"')
-      .replaceAll('–', '-')
-      .replaceAll('—', '-');
-  // Drop ALL parenthetical / bracketed / braced content. Year stamps
-  // "(2020)", format markers "[EP]" / "[Single]", soundtrack tags,
-  // and editorial suffixes all disappear — they almost never indicate
-  // a genuinely different album.
-  n = n.replaceAll(RegExp(r'\s*[\(\[\{][^\)\]\}]*[\)\]\}]'), ' ');
-  // Strip leading track-number prefixes ("01 - ", "01. ", "01 ").
-  n = n.replaceFirst(RegExp(r'^\d+\s*[-.\s]\s*'), '');
-  // Reduce to alphanumeric + space. Periods, commas, colons,
-  // apostrophes, exclamation marks etc. all collapse so "Damn." and
-  // "Damn" — or "Don't" and "Dont" — share a key.
-  n = n.replaceAll(RegExp(r'[^a-z0-9\s]'), ' ');
-  n = n.replaceAll(RegExp(r'\s+'), ' ').trim();
-  return n;
-}
-
-/// Title-cases an album name so the card never displays as "album" or
-/// "ALBUM" — always "Album". Words shorter than 4 letters keep their
-/// natural form so common stopwords stay lowercase ("of the", "and",
-/// etc.) and acronyms (U2, NWA) aren't damaged. The first word is
-/// always capitalised regardless.
-String _displayAlbumName(String s) {
-  final trimmed = s.trim();
-  if (trimmed.isEmpty) return trimmed;
-  final parts = trimmed.split(RegExp(r'\s+'));
-  return parts.asMap().entries.map((entry) {
-    final i = entry.key;
-    final word = entry.value;
-    if (word.isEmpty) return word;
-    // Leave existing capitals alone — protects acronyms, brand names,
-    // stylised titles (e.g. "DAMN."). Only fix words that are fully
-    // lowercase or fully uppercase.
-    final lower = word.toLowerCase();
-    final upper = word.toUpperCase();
-    final isAllOneCase = word == lower || word == upper;
-    if (!isAllOneCase) return word;
-    final stopwords = i == 0
-        ? const <String>{}
-        : const {
-            'a', 'an', 'the', 'of', 'and', 'or', 'but', 'in', 'on',
-            'at', 'to', 'for', 'by', 'with', 'as', 'from', 'is',
-          };
-    if (stopwords.contains(lower)) return lower;
-    return lower[0].toUpperCase() + lower.substring(1);
-  }).join(' ');
-}
-
-/// Roll up the songs stream into one entry per album. Songs are
-/// grouped by *album name only* (not artist) so a single album's
-/// songs collapse into one card even when their tagged artist field
-/// drifts (different "feat." spellings, blank artist on some tracks,
-/// compilation albums where every track has a different artist).
-final _albumsProvider =
-    Provider.autoDispose<AsyncValue<List<_AlbumRollup>>>((ref) {
-  final asyncSongs = ref.watch(allSongsProvider);
-  return asyncSongs.whenData((songs) {
-    final byKey = <String, List<SongRow>>{};
-    for (final s in songs) {
-      final album = s.album;
-      if (album == null || album.isEmpty) continue;
-      final key = _normalizeAlbumKey(album);
-      if (key.isEmpty) continue;
-      (byKey[key] ??= <SongRow>[]).add(s);
-    }
-    final rolls = byKey.entries.map((e) {
-      final list = e.value;
-      final cover = list.firstWhere(
-        (s) => s.localArtworkPath != null,
-        orElse: () => list.first,
-      );
-      return _AlbumRollup(
-        name: _displayAlbumName(cover.album!),
-        artist: cover.artist ?? '',
-        coverPath: cover.localArtworkPath,
-        coverSeed: 'al_${cover.id}',
-        songCount: list.length,
-      );
-    }).toList()
-      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    return rolls;
-  });
-});
 
 class LibraryScreen extends ConsumerWidget {
   const LibraryScreen({super.key});
@@ -169,8 +47,12 @@ class LibraryScreen extends ConsumerWidget {
           padding: const EdgeInsets.fromLTRB(0, LumenTokens.topSafePad, 0, 0),
           sliver: SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(LumenTokens.pagePad, 0,
-                  LumenTokens.pagePad, 16),
+              padding: const EdgeInsets.fromLTRB(
+                LumenTokens.pagePad,
+                0,
+                LumenTokens.pagePad,
+                16,
+              ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
@@ -189,8 +71,7 @@ class LibraryScreen extends ConsumerWidget {
                     IconButton(
                       icon: const Icon(Icons.bug_report_outlined),
                       onPressed: () async {
-                        final seed =
-                            DevSeed(ref.read(appDatabaseProvider));
+                        final seed = DevSeed(ref.read(appDatabaseProvider));
                         await seed.run();
                       },
                     ),
@@ -201,17 +82,20 @@ class LibraryScreen extends ConsumerWidget {
         ),
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(LumenTokens.pagePad, 0,
-                LumenTokens.pagePad, 18),
+            padding: const EdgeInsets.fromLTRB(
+              LumenTokens.pagePad,
+              0,
+              LumenTokens.pagePad,
+              18,
+            ),
             child: _SubTabs(
               tabs: _tabs,
               active: tab,
-              onChange: (t) =>
-                  ref.read(libraryChipProvider.notifier).state = t,
+              onChange: (t) => ref.read(libraryChipProvider.notifier).state = t,
             ),
           ),
         ),
-        if (tab == 'Songs') const _SongsSliver(),
+        if (tab == 'Songs') ...[const _SongsControls(), const _SongsSliver()],
         if (tab == 'Artists') const _ArtistsSliver(),
         if (tab == 'Albums') const _AlbumsSliver(),
         if (tab == 'Playlists') const _PlaylistsSliver(),
@@ -253,10 +137,21 @@ class _SubTabs extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: t == active
                         ? (isLight
-                            ? Colors.white.withValues(alpha: 0.65)
-                            : Colors.white.withValues(alpha: 0.18))
+                              ? Colors.white
+                              : Colors.white.withValues(alpha: 0.18))
                         : Colors.transparent,
                     borderRadius: BorderRadius.circular(LumenTokens.rPill),
+                    boxShadow: (t == active && isLight)
+                        ? [
+                            BoxShadow(
+                              color: const Color(
+                                0xFF141428,
+                              ).withValues(alpha: 0.12),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ]
+                        : null,
                   ),
                   child: Text(
                     t,
@@ -277,15 +172,176 @@ class _SubTabs extends StatelessWidget {
   }
 }
 
-class _SongsSliver extends ConsumerWidget {
-  const _SongsSliver();
+/// Songs-tab control row: count + duration, a favorites filter, and a
+/// sort selector.
+class _SongsControls extends ConsumerWidget {
+  const _SongsControls();
+
+  String _fmtTotal(int totalMs) {
+    if (totalMs <= 0) return '';
+    final m = totalMs ~/ 60000;
+    final h = m ~/ 60;
+    final min = m % 60;
+    return h == 0 ? ' · $min min' : ' · $h hr $min min';
+  }
+
+  Future<void> _pickSort(
+    BuildContext context,
+    WidgetRef ref,
+    LibrarySort current,
+  ) async {
+    final picked = await showGlassSheet<LibrarySort>(
+      context,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Sort by', style: glassEyebrow(context)),
+            ),
+          ),
+          for (final s in LibrarySort.values)
+            Pressable(
+              onTap: () => Navigator.of(context).pop(s),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 13,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        s.label,
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: LumenTokens.fg(context),
+                        ),
+                      ),
+                    ),
+                    if (s == current)
+                      const Icon(
+                        Icons.check_rounded,
+                        size: 20,
+                        color: LumenTokens.accent,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          const SizedBox(height: 6),
+        ],
+      ),
+    );
+    if (picked != null) {
+      ref.read(librarySortProvider.notifier).state = picked;
+    }
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final async = ref.watch(allSongsProvider);
-    final playingId = ref.watch(
-      nowPlayingProvider.select((s) => s?.id),
+    final songs =
+        ref.watch(librarySongsProvider).valueOrNull ?? const <SongRow>[];
+    final favOnly = ref.watch(libraryFavoritesOnlyProvider);
+    final sort = ref.watch(librarySortProvider);
+    final totalMs = songs.fold<int>(0, (s, r) => s + (r.durationMs ?? 0));
+    final meta =
+        '${songs.length} song${songs.length == 1 ? '' : 's'}${_fmtTotal(totalMs)}';
+
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          LumenTokens.pagePad,
+          0,
+          LumenTokens.pagePad,
+          10,
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                meta,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: LumenTokens.fgDimOf(context),
+                ),
+              ),
+            ),
+            Pressable(
+              onTap: () =>
+                  ref.read(libraryFavoritesOnlyProvider.notifier).state =
+                      !favOnly,
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: Icon(
+                  favOnly
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
+                  size: 20,
+                  color: favOnly
+                      ? LumenTokens.accent
+                      : LumenTokens.fgDimOf(context),
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Pressable(
+              onTap: () => _pickSort(context, ref, sort),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.swap_vert_rounded,
+                      size: 18,
+                      color: LumenTokens.fgDimOf(context),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      sort.label,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: LumenTokens.fg(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
+  }
+}
+
+class _SongsSliver extends ConsumerStatefulWidget {
+  const _SongsSliver();
+
+  @override
+  ConsumerState<_SongsSliver> createState() => _SongsSliverState();
+}
+
+class _SongsSliverState extends ConsumerState<_SongsSliver> {
+  // Cascade the first screenful, once. After the entrance window closes the
+  // flag flips so scroll-recycled rows never re-fire the animation.
+  static const _cap = 8;
+  bool _entered = false;
+  bool _scheduled = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final async = ref.watch(librarySongsProvider);
+    final favOnly = ref.watch(libraryFavoritesOnlyProvider);
+    final playingId = ref.watch(nowPlayingProvider.select((s) => s?.id));
+    final isPlaying =
+        ref.watch(playerStateStreamProvider).valueOrNull?.playing ?? false;
 
     return async.when(
       loading: () => const SliverToBoxAdapter(
@@ -303,21 +359,40 @@ class _SongsSliver extends ConsumerWidget {
       data: (songs) {
         if (songs.isEmpty) {
           return _EmptySliver(
-            text: 'No songs yet.\nSync from the profile menu.',
+            text: favOnly
+                ? 'No favorites yet.\nTap the heart on a song to add it.'
+                : 'No songs yet.\nSync from the profile menu.',
           );
+        }
+        if (!_entered && !_scheduled) {
+          _scheduled = true;
+          Future<void>.delayed(const Duration(milliseconds: 750), () {
+            if (mounted) setState(() => _entered = true);
+          });
         }
         return SliverList.builder(
           itemCount: songs.length,
           itemBuilder: (context, i) {
             final s = songs[i];
-            return SongTile(
+            return StaggeredAppear(
               key: ValueKey(s.id),
-              song: s,
-              isPlaying: playingId == s.id,
-              onTap: () => _open(context, ref, songs, i),
-              onLongPress: () => SongActionsSheet.show(context, s),
-              onFavoriteToggle: () =>
-                  ref.read(libraryActionsProvider).toggleFavorite(s),
+              index: i,
+              maxItems: _cap,
+              animate: !_entered && i < _cap,
+              child: SongTile(
+                song: s,
+                isPlaying: playingId == s.id,
+                onTap: () {
+                  if (playingId == s.id && isPlaying) {
+                    PlayerExpansionScope.maybeRead(context)?.expand();
+                  } else {
+                    _open(context, songs, i);
+                  }
+                },
+                onLongPress: () => SongActionsSheet.show(context, s),
+                onFavoriteToggle: () =>
+                    ref.read(libraryActionsProvider).toggleFavorite(s),
+              ),
             );
           },
         );
@@ -327,16 +402,13 @@ class _SongsSliver extends ConsumerWidget {
 
   Future<void> _open(
     BuildContext context,
-    WidgetRef ref,
     List<SongRow> queue,
     int index,
   ) async {
     final messenger = ScaffoldMessenger.of(context);
     ref.read(aiDjQueueControllerProvider.notifier).deactivate();
     try {
-      await ref
-          .read(nowPlayingProvider.notifier)
-          .playFromQueue(queue, index);
+      await ref.read(nowPlayingProvider.notifier).playFromQueue(queue, index);
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Could not play: $e')));
       return;
@@ -348,11 +420,20 @@ class _SongsSliver extends ConsumerWidget {
 
 /// Vertical list of artists. Round avatar + name + chevron. Tapping
 /// hops over to Search and pre-fills the artist's name.
-class _ArtistsSliver extends ConsumerWidget {
+class _ArtistsSliver extends ConsumerStatefulWidget {
   const _ArtistsSliver();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_ArtistsSliver> createState() => _ArtistsSliverState();
+}
+
+class _ArtistsSliverState extends ConsumerState<_ArtistsSliver> {
+  static const _cap = 10;
+  bool _entered = false;
+  bool _scheduled = false;
+
+  @override
+  Widget build(BuildContext context) {
     final async = ref.watch(topArtistsProvider);
     final resolver = ref.watch(artistImageResolverProvider).valueOrNull;
 
@@ -373,55 +454,82 @@ class _ArtistsSliver extends ConsumerWidget {
         if (artists.isEmpty) {
           return _EmptySliver(text: 'No artists yet.');
         }
+        if (!_entered && !_scheduled) {
+          _scheduled = true;
+          Future<void>.delayed(const Duration(milliseconds: 750), () {
+            if (mounted) setState(() => _entered = true);
+          });
+        }
         return SliverList.builder(
           itemCount: artists.length,
           itemBuilder: (context, i) {
             final a = artists[i];
-            return InkWell(
-              onTap: () {
-                ref
-                    .read(librarySearchControllerProvider.notifier)
-                    .onQueryChanged(a.name);
-                ref.read(homeTabIndexProvider.notifier).state = 2;
-              },
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(
-                    LumenTokens.pagePad, 6, LumenTokens.pagePad, 6),
-                child: Row(
+            final last = i == artists.length - 1;
+            return StaggeredAppear(
+              index: i,
+              animate: !_entered && i < _cap,
+              child: Pressable(
+                onTap: () => openArtist(context, a.name),
+                child: Column(
                   children: [
-                    AlbumArt(
-                      artworkPath: resolver?.localPath(a.name),
-                      seed: 'ar_${a.name}',
-                      size: 52,
-                      radius: LumenTokens.rPill,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        LumenTokens.pagePad,
+                        8,
+                        LumenTokens.pagePad,
+                        8,
+                      ),
+                      child: Row(
                         children: [
-                          Text(
-                            a.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
+                          AlbumArt(
+                            artworkPath: resolver?.localPath(a.name),
+                            seed: 'ar_${a.name}',
+                            size: 54,
+                            radius: LumenTokens.rPill,
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  a.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '${a.songCount} song${a.songCount == 1 ? '' : 's'}',
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    color: LumenTokens.fgDimOf(context),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          Text(
-                            '${a.songCount} song${a.songCount == 1 ? '' : 's'}',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: LumenTokens.fgDimOf(context),
-                            ),
+                          Icon(
+                            Icons.chevron_right,
+                            size: 20,
+                            color: LumenTokens.fgDim2Of(context),
                           ),
                         ],
                       ),
                     ),
-                    Icon(Icons.chevron_right,
-                        size: 18,
-                        color: LumenTokens.fgDimOf(context)),
+                    // Inset hairline so the list reads as grouped rows
+                    // rather than floating items — aligned to the text
+                    // start (avatar width + gap).
+                    if (!last)
+                      const Padding(
+                        padding: EdgeInsets.only(
+                          left: 68 + LumenTokens.pagePad,
+                        ),
+                        child: Divider(height: 1),
+                      ),
                   ],
                 ),
               ),
@@ -433,14 +541,22 @@ class _ArtistsSliver extends ConsumerWidget {
   }
 }
 
-/// 2-column grid of album cards. Tapping pre-fills search with the
-/// album name (no dedicated album-detail screen exists yet).
-class _AlbumsSliver extends ConsumerWidget {
+/// 2-column grid of album cards → album detail page.
+class _AlbumsSliver extends ConsumerStatefulWidget {
   const _AlbumsSliver();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final async = ref.watch(_albumsProvider);
+  ConsumerState<_AlbumsSliver> createState() => _AlbumsSliverState();
+}
+
+class _AlbumsSliverState extends ConsumerState<_AlbumsSliver> {
+  static const _cap = 8;
+  bool _entered = false;
+  bool _scheduled = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final async = ref.watch(albumsProvider);
     return async.when(
       loading: () => const SliverToBoxAdapter(
         child: Padding(
@@ -458,6 +574,12 @@ class _AlbumsSliver extends ConsumerWidget {
         if (list.isEmpty) {
           return _EmptySliver(text: 'No albums yet.');
         }
+        if (!_entered && !_scheduled) {
+          _scheduled = true;
+          Future<void>.delayed(const Duration(milliseconds: 750), () {
+            if (mounted) setState(() => _entered = true);
+          });
+        }
         return SliverPadding(
           padding: const EdgeInsets.symmetric(horizontal: LumenTokens.pagePad),
           sliver: SliverGrid(
@@ -467,17 +589,13 @@ class _AlbumsSliver extends ConsumerWidget {
               crossAxisSpacing: 14,
               childAspectRatio: 0.82,
             ),
-            delegate: SliverChildBuilderDelegate(
-              (context, i) {
-                final al = list[i];
-                return InkWell(
-                  borderRadius: BorderRadius.circular(LumenTokens.rSm),
-                  onTap: () {
-                    ref
-                        .read(librarySearchControllerProvider.notifier)
-                        .onQueryChanged(al.name);
-                    ref.read(homeTabIndexProvider.notifier).state = 2;
-                  },
+            delegate: SliverChildBuilderDelegate((context, i) {
+              final al = list[i];
+              return StaggeredAppear(
+                index: i,
+                animate: !_entered && i < _cap,
+                child: Pressable(
+                  onTap: () => openAlbum(context, al.name),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -511,10 +629,9 @@ class _AlbumsSliver extends ConsumerWidget {
                       ),
                     ],
                   ),
-                );
-              },
-              childCount: list.length,
-            ),
+                ),
+              );
+            }, childCount: list.length),
           ),
         );
       },
@@ -522,11 +639,20 @@ class _AlbumsSliver extends ConsumerWidget {
   }
 }
 
-class _PlaylistsSliver extends ConsumerWidget {
+class _PlaylistsSliver extends ConsumerStatefulWidget {
   const _PlaylistsSliver();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_PlaylistsSliver> createState() => _PlaylistsSliverState();
+}
+
+class _PlaylistsSliverState extends ConsumerState<_PlaylistsSliver> {
+  static const _cap = 8;
+  bool _entered = false;
+  bool _scheduled = false;
+
+  @override
+  Widget build(BuildContext context) {
     final async = ref.watch(allPlaylistsProvider);
     return async.when(
       loading: () => const SliverToBoxAdapter(
@@ -547,6 +673,12 @@ class _PlaylistsSliver extends ConsumerWidget {
             text: 'No playlists yet.\nLong-press any song -> Add to playlist.',
           );
         }
+        if (!_entered && !_scheduled) {
+          _scheduled = true;
+          Future<void>.delayed(const Duration(milliseconds: 750), () {
+            if (mounted) setState(() => _entered = true);
+          });
+        }
         return SliverPadding(
           padding: const EdgeInsets.symmetric(horizontal: LumenTokens.pagePad),
           sliver: SliverGrid(
@@ -556,18 +688,16 @@ class _PlaylistsSliver extends ConsumerWidget {
               crossAxisSpacing: 14,
               childAspectRatio: 0.78,
             ),
-            delegate: SliverChildBuilderDelegate(
-              (context, i) {
-                final pl = list[i];
-                return RepaintBoundary(
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(LumenTokens.rLg),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            PlaylistDetailScreen(playlistId: pl.id),
-                      ),
-                    ),
+            delegate: SliverChildBuilderDelegate((context, i) {
+              final pl = list[i];
+              return StaggeredAppear(
+                index: i,
+                animate: !_entered && i < _cap,
+                child: RepaintBoundary(
+                  child: Pressable(
+                    onTap: () => Navigator.of(
+                      context,
+                    ).pushLumen((_) => PlaylistDetailScreen(playlistId: pl.id)),
                     child: Glass(
                       borderRadius: LumenTokens.rLg,
                       padding: const EdgeInsets.all(10),
@@ -610,10 +740,9 @@ class _PlaylistsSliver extends ConsumerWidget {
                       ),
                     ),
                   ),
-                );
-              },
-              childCount: list.length,
-            ),
+                ),
+              );
+            }, childCount: list.length),
           ),
         );
       },

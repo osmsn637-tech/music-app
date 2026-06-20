@@ -60,8 +60,7 @@ class ListeningTracker {
   /// `skip`) and starts a fresh one for [newSong].
   Future<void> onSongChanged(SongRow? newSong) async {
     final previous = _currentSong;
-    if (previous != null &&
-        (newSong == null || newSong.id != previous.id)) {
+    if (previous != null && (newSong == null || newSong.id != previous.id)) {
       await _resolveOpenSession();
     }
 
@@ -72,15 +71,14 @@ class ListeningTracker {
 
     if (newSong == null) return;
 
-    final isReplay = _lastCompletedSongId == newSong.id &&
+    final isReplay =
+        _lastCompletedSongId == newSong.id &&
         _lastCompletedAt != null &&
         _now().difference(_lastCompletedAt!) <= _replayWindow;
 
     await _emit(
       songId: newSong.id,
-      type: isReplay
-          ? ListeningEventType.replay
-          : ListeningEventType.play,
+      type: isReplay ? ListeningEventType.replay : ListeningEventType.play,
     );
   }
 
@@ -142,10 +140,7 @@ class ListeningTracker {
 
   /// Call when the user adds a song to a playlist.
   Future<void> onAddedToPlaylist(String songId) {
-    return _emit(
-      songId: songId,
-      type: ListeningEventType.addToPlaylist,
-    );
+    return _emit(songId: songId, type: ListeningEventType.addToPlaylist);
   }
 
   /// Resolves the currently-open session (if any) — used at app shutdown

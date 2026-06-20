@@ -5,6 +5,9 @@ import '../../core/services/providers.dart';
 import '../../data/sources/manifest_api.dart';
 import '../../features/sync/providers.dart';
 import '../../features/sync/sync_models.dart';
+import '../theme/app_theme.dart';
+import '../widgets/glass.dart';
+import '../widgets/glass_kit.dart';
 import '../widgets/sync_progress_card.dart';
 
 class SyncScreen extends ConsumerStatefulWidget {
@@ -62,7 +65,9 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
     if (_controller.text.trim().isEmpty) return;
     await _persistUrl();
     if (mounted) setState(() => _editing = false);
-    await ref.read(syncControllerProvider.notifier).run(_controller.text.trim());
+    await ref
+        .read(syncControllerProvider.notifier)
+        .run(_controller.text.trim());
   }
 
   void _beginEditing() {
@@ -93,12 +98,11 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
     // bits (action buttons, progress card, activity log) are extracted
     // into ConsumerWidget leaves that scope their own watches.
     final scheme = Theme.of(context).colorScheme;
-    final savedUrl =
-        (ref.watch(serverUrlProvider).valueOrNull ?? '').trim();
+    final savedUrl = (ref.watch(serverUrlProvider).valueOrNull ?? '').trim();
     final showEditor = _editing || savedUrl.isEmpty;
 
-    return Scaffold(
-      appBar: AppBar(),
+    return StageScaffold(
+      title: 'Sync',
       body: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: _dismissEditor,
@@ -114,20 +118,14 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
                     transitionBuilder: (child, anim) =>
                         FadeTransition(opacity: anim, child: child),
                     child: showEditor
-                        ? TextField(
+                        ? GlassField(
                             key: const ValueKey('editor'),
                             controller: _controller,
                             focusNode: _urlFocus,
                             autofocus: savedUrl.isNotEmpty,
                             onSubmitted: (_) => _dismissEditor(),
-                            decoration: const InputDecoration(
-                              labelText: 'Server URL',
-                              hintText: 'http://192.101.2.87:8000',
-                              border: OutlineInputBorder(),
-                            ),
+                            hint: 'http://192.101.2.87:8000',
                             keyboardType: TextInputType.url,
-                            autocorrect: false,
-                            enableSuggestions: false,
                           )
                         : _ServerUrlPill(
                             key: const ValueKey('pill'),
@@ -174,36 +172,27 @@ class _SyncActionsRow extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final running = ref.watch(
-      syncControllerProvider.select((p) => p.running),
-    );
+    final running = ref.watch(syncControllerProvider.select((p) => p.running));
     return Row(
       children: [
         Expanded(
-          child: OutlinedButton.icon(
+          child: GlassButton(
+            label: 'Test connection',
+            icon: Icons.wifi_tethering,
+            expand: true,
+            loading: testing,
             onPressed: (testing || running) ? null : onTest,
-            icon: testing
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.wifi_tethering),
-            label: const Text('Test connection'),
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 10),
         Expanded(
-          child: FilledButton.icon(
+          child: GlassButton(
+            label: 'Sync',
+            icon: Icons.sync,
+            primary: true,
+            expand: true,
+            loading: running,
             onPressed: running ? null : onSync,
-            icon: running
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.sync),
-            label: const Text('Sync'),
           ),
         ),
       ],
@@ -219,28 +208,28 @@ class _TestResultBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: result.ok ? scheme.primaryContainer : scheme.errorContainer,
-        borderRadius: BorderRadius.circular(8),
-      ),
+    // Glass surface; the semantic ok/error colour rides only the icon +
+    // text so the card stays in the frosted language instead of a flat
+    // green/red fill.
+    final accent = result.ok ? const Color(0xFF54E39B) : scheme.error;
+    return Glass(
+      borderRadius: LumenTokens.rMd,
+      padding: const EdgeInsets.all(14),
       child: Row(
         children: [
           Icon(
-            result.ok ? Icons.check_circle : Icons.error,
-            color: result.ok
-                ? scheme.onPrimaryContainer
-                : scheme.onErrorContainer,
+            result.ok ? Icons.check_circle_rounded : Icons.error_rounded,
+            color: accent,
+            size: 20,
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Expanded(
             child: Text(
               result.message,
               style: TextStyle(
-                color: result.ok
-                    ? scheme.onPrimaryContainer
-                    : scheme.onErrorContainer,
+                fontSize: 13.5,
+                fontWeight: FontWeight.w500,
+                color: LumenTokens.fg(context),
               ),
             ),
           ),
@@ -259,9 +248,8 @@ class _SyncProgressSliver extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final progress = ref.watch(syncControllerProvider);
-    final visible = progress.running ||
-        progress.items.isNotEmpty ||
-        progress.error != null;
+    final visible =
+        progress.running || progress.items.isNotEmpty || progress.error != null;
     if (!visible) return const SliverToBoxAdapter(child: SizedBox.shrink());
     return SliverPadding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -279,9 +267,7 @@ class _RecentLogSliver extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final items = ref.watch(
-      syncControllerProvider.select((p) => p.items),
-    );
+    final items = ref.watch(syncControllerProvider.select((p) => p.items));
     if (items.isEmpty) {
       return const SliverToBoxAdapter(child: SizedBox.shrink());
     }
@@ -327,48 +313,38 @@ class _ServerUrlPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        splashFactory: NoSplash.splashFactory,
-        highlightColor: Colors.white.withValues(alpha: 0.04),
-        child: Ink(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: const Color(0xFF09090B),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Importing from',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: -0.1,
-                ),
+    return Pressable(
+      onTap: onTap,
+      child: Glass(
+        borderRadius: LumenTokens.rMd,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Importing from',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: LumenTokens.fg(context),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.1,
               ),
-              const SizedBox(height: 1),
-              Text(
-                url,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.45),
-                  fontSize: 10.5,
-                  height: 1.25,
-                ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              url,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: LumenTokens.fgDimOf(context),
+                fontSize: 10.5,
+                height: 1.25,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

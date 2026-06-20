@@ -9,11 +9,12 @@ class LumenTokens {
   // ─── Stage (under everything) ─────────────────────────────────────────
   static const stageBg = Color(0xFF050507);
   static const surfaceBg = Color(0xFF0A0A0C);
-  static const lightStageBg = Color(0xFFF3F1EE); // warm cream
+  static const lightStageBg = Color(0xFFE6E0D5); // muted warm greige
 
   // ─── Brand ────────────────────────────────────────────────────────────
   /// Primary pink. Active tabs, hearts, AI/DJ accents. Never a card fill.
   static const accent = Color(0xFFFF7AA8);
+
   /// High-contrast variant used on light-mode pill buttons / labels.
   static const accentStrong = Color(0xFFD63384);
 
@@ -32,18 +33,15 @@ class LumenTokens {
   static const lightBlobPink = Color(0xFFFFC4D8);
 
   // ─── Glass tints — dark ───────────────────────────────────────────────
-  static const glassTintWeak = Color(0x0FFFFFFF);   // 6% white
+  static const glassTintWeak = Color(0x0FFFFFFF); // 6% white
   static const glassTintStrong = Color(0x1AFFFFFF); // 10% white
   static const glassBorderWeak = Color(0x14FFFFFF); // 8%
   static const glassBorderStrong = Color(0x1FFFFFFF); // 12%
 
   // ─── Glass tints — light ──────────────────────────────────────────────
-  static Color get glassTintWeakLight =>
-      Colors.white.withValues(alpha: 0.55);
-  static Color get glassTintStrongLight =>
-      Colors.white.withValues(alpha: 0.70);
-  static Color get glassBorderWeakLight =>
-      Colors.white.withValues(alpha: 0.70);
+  static Color get glassTintWeakLight => Colors.white.withValues(alpha: 0.55);
+  static Color get glassTintStrongLight => Colors.white.withValues(alpha: 0.70);
+  static Color get glassBorderWeakLight => Colors.white.withValues(alpha: 0.70);
   static Color get glassBorderStrongLight =>
       Colors.white.withValues(alpha: 0.85);
 
@@ -57,22 +55,27 @@ class LumenTokens {
   static const fgLightPrimary = Color(0xFF111111);
   static Color fgLightDim = const Color(0xFF111111).withValues(alpha: 0.62);
   static Color fgLightDim2 = const Color(0xFF111111).withValues(alpha: 0.45);
-  static Color fgLightDisabled =
-      const Color(0xFF111111).withValues(alpha: 0.28);
+  static Color fgLightDisabled = const Color(
+    0xFF111111,
+  ).withValues(alpha: 0.28);
 
   /// Theme-aware primary foreground.
   static Color fg(BuildContext c) =>
       Theme.of(c).brightness == Brightness.dark ? fgPrimary : fgLightPrimary;
+
   /// Theme-aware dim (meta).
   static Color fgDimOf(BuildContext c) =>
       Theme.of(c).brightness == Brightness.dark ? fgDim : fgLightDim;
+
   /// Theme-aware dim-2 (eyebrows, hints).
   static Color fgDim2Of(BuildContext c) =>
       Theme.of(c).brightness == Brightness.dark ? fgDim2 : fgLightDim2;
 
   // ─── Pill button (white-on-dark in dark, black-on-cream in light) ────
   static Color btnPillBg(BuildContext c) =>
-      Theme.of(c).brightness == Brightness.dark ? Colors.white : const Color(0xFF111111);
+      Theme.of(c).brightness == Brightness.dark
+      ? Colors.white
+      : const Color(0xFF111111);
   static Color btnPillFg(BuildContext c) =>
       Theme.of(c).brightness == Brightness.dark ? Colors.black : Colors.white;
 
@@ -89,11 +92,26 @@ class LumenTokens {
   static const r2xs = 10.0;
 
   // ─── Motion ───────────────────────────────────────────────────────────
-  static const ease = Cubic(0.215, 0.61, 0.355, 1.0);
-  static const easeOut = Cubic(0.16, 1.0, 0.3, 1.0);
+  // Curves — one per role so call sites read by intent.
+  static const ease = Cubic(0.215, 0.61, 0.355, 1.0); // Material standard
+  static const easeOut = Cubic(0.16, 1.0, 0.3, 1.0); // decelerate
+  static const lumenStandard = ease; // in-place change
+  static const lumenDecelerate = easeOut; // entering / arrivals
+  static const lumenEmphasized = Cubic(0.2, 0.0, 0.0, 1.0); // large distance
+  static const lumenAccelerate = Cubic(0.4, 0.0, 1.0, 1.0); // leaving / dismiss
+  static const lumenOvershoot = Cubic(0.34, 1.56, 0.64, 1.0); // toggle pop
+
+  // Durations.
   static const dFast = Duration(milliseconds: 180);
   static const dBase = Duration(milliseconds: 260);
   static const dSlow = Duration(milliseconds: 400);
+  static const mInstant = Duration(milliseconds: 110); // press / release
+  static const mFast = dFast; // 180 — quick swaps
+  static const mBase = dBase; // 260 — default
+  static const mSlow = Duration(milliseconds: 420); // large surfaces
+  static const mPage = Duration(milliseconds: 320); // route enter
+  static const mPageExit = Duration(milliseconds: 240); // route pop
+  static const mStaggerStep = Duration(milliseconds: 45); // per-item offset
 
   // ─── Page padding ─────────────────────────────────────────────────────
   static const pagePad = 18.0;
@@ -264,12 +282,18 @@ class LumenTod {
   }) {
     final list = brightness == Brightness.dark
         ? const [
-            (5, dawnDark), (8, dayDark), (16, goldenDark),
-            (19, duskDark), (22, nightDark),
+            (5, dawnDark),
+            (8, dayDark),
+            (16, goldenDark),
+            (19, duskDark),
+            (22, nightDark),
           ]
         : const [
-            (5, dawnLight), (8, dayLight), (16, goldenLight),
-            (19, duskLight), (22, nightLight),
+            (5, dawnLight),
+            (8, dayLight),
+            (16, goldenLight),
+            (19, duskLight),
+            (22, nightLight),
           ];
     // Hour on the 5..29 timeline so 22..5am wraps cleanly.
     final raw = now.hour + now.minute / 60.0;
@@ -302,12 +326,27 @@ class LumenTod {
   /// Eyebrow date label — ALL CAPS, used above the greeting.
   static String dateLabel(DateTime now) {
     const days = [
-      'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY',
-      'SATURDAY', 'SUNDAY',
+      'MONDAY',
+      'TUESDAY',
+      'WEDNESDAY',
+      'THURSDAY',
+      'FRIDAY',
+      'SATURDAY',
+      'SUNDAY',
     ];
     const months = [
-      'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
-      'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
+      'JAN',
+      'FEB',
+      'MAR',
+      'APR',
+      'MAY',
+      'JUN',
+      'JUL',
+      'AUG',
+      'SEP',
+      'OCT',
+      'NOV',
+      'DEC',
     ];
     return '${days[now.weekday - 1]}, ${months[now.month - 1]} ${now.day}';
   }

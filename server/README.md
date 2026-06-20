@@ -303,6 +303,46 @@ Note this won't auto-restart and you have to keep the terminal open.
   architecture isn't supported by piper-tts 1.2.0. Try pinning a newer
   version in `piper/Dockerfile` or fall back to the host-Python setup.
 
+## Live Connect — play across your devices (real-time handoff)
+
+`connect/` is a tiny FastAPI WebSocket service that keeps playback in sync
+across your iPhone, Android, and the Mac app and lets you **transfer playback
+between them mid-song** (Spotify-Connect style) plus remote-control whichever
+device is currently playing. It's a long-running service like nginx/piper, so
+it starts with `docker compose up -d`.
+
+```bash
+# pick a private shared code all your devices will use, then bring it up:
+ROOM_CODE=your-secret-code docker compose up -d connect
+
+# verify:
+curl http://localhost:8002/health      # {"ok":true,"room":true,"devices":0,"active":null}
+```
+
+In the app on **every** device: Settings → Live Connect → enter
+`ws://<your-lan-ip>:8002/ws` and the same `ROOM_CODE`. Devices sharing a room
+code see each other and can hand off playback.
+
+- **LAN** (all devices on the same Wi-Fi): `ws://<lan-ip>:8002/ws` — simplest.
+- **Across networks** (phone on cellular, Mac at home): deploy `connect` on a
+  small cloud box and put it behind a TLS reverse proxy, then use
+  `wss://<host>/connect/ws`. Plain `ws://` over the internet is unencrypted —
+  **do not** expose port 8002 publicly without TLS.
+
+State (current song / queue / position) is snapshotted to
+`connect/state/state.json` so a service restart doesn't lose the session.
+Wire protocol is frozen as `protocol: 1` (see `connect/app.py`). Run the
+built-in two-device self-test any time with:
+
+```bash
+docker compose run --rm --no-deps --entrypoint python \
+  connect selftest.py ws://connect:8002/ws "$ROOM_CODE"
+```
+
+Security: same unauthenticated-LAN posture as the music + piper servers — the
+room code is the only gate. Keep it private; rotate it by changing `ROOM_CODE`
+and `docker compose up -d connect`.
+
 ## First-run smoke test
 
 The repo ships with two CC0 sample MP3s in `content/songs/` and a

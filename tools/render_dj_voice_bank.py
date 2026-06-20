@@ -66,23 +66,25 @@ class Line:
 
     @property
     def relative_path(self) -> Path:
+        # MP3 (not Opus): flutter_soloud's loadFile decodes MP3/Wav/Vorbis/FLAC
+        # but NOT Ogg-Opus, so an Opus bank fails to decode and the DJ is silent.
         if self.kind == "generic":
-            return Path("generic") / f"{self.id}.opus"
+            return Path("generic") / f"{self.id}.mp3"
         if self.kind == "mode_intro":
-            # mode_intro_<mode>_NNN -> mode_intros/<mode>/<id>.opus
+            # mode_intro_<mode>_NNN -> mode_intros/<mode>/<id>.mp3
             rest = self.id[len("mode_intro_"):]
             mode = re.sub(r"_\d+$", "", rest)
-            return Path("mode_intros") / mode / f"{self.id}.opus"
+            return Path("mode_intros") / mode / f"{self.id}.mp3"
         if self.kind == "artist":
             slug = self.id[len("artist_"):]
             slug = re.sub(r"_\d+$", "", slug).replace("_", "-")
-            return Path("artists") / slug / f"{self.id}.opus"
+            return Path("artists") / slug / f"{self.id}.mp3"
         if self.kind == "song":
             # song_<slug>_NNN OR song_<slug>_lyric_NNN
             rest = self.id[len("song_"):]
             slug = re.sub(r"_(?:lyric_)?\d+$", "", rest).replace("_", "-")
-            return Path("songs") / slug / f"{self.id}.opus"
-        return Path(f"{self.id}.opus")
+            return Path("songs") / slug / f"{self.id}.mp3"
+        return Path(f"{self.id}.mp3")
 
 
 def parse_script(md: Path) -> list[Line]:
@@ -109,17 +111,21 @@ def run_ffmpeg(cmd: list[str]) -> None:
         raise RuntimeError(f"ffmpeg failed: {' '.join(cmd[:4])} ...")
 
 
-def encode_opus(wav: Path, opus: Path) -> None:
-    """Encode WAV -> Opus 32 kbps mono."""
-    opus.parent.mkdir(parents=True, exist_ok=True)
+def encode_mp3(wav: Path, mp3: Path) -> None:
+    """Encode WAV -> MP3 64 kbps mono.
+
+    MP3 (decoded by SoLoud's dr_mp3) instead of Opus — flutter_soloud's
+    loadFile cannot decode Ogg-Opus, so an Opus bank is silent on every
+    platform.
+    """
+    mp3.parent.mkdir(parents=True, exist_ok=True)
     run_ffmpeg([
         "ffmpeg", "-y", "-loglevel", "error",
         "-i", str(wav),
-        "-c:a", "libopus",
-        "-b:a", "32k",
+        "-c:a", "libmp3lame",
+        "-b:a", "64k",
         "-ac", "1",
-        "-ar", "24000",
-        str(opus),
+        str(mp3),
     ])
 
 
@@ -176,8 +182,8 @@ def main() -> None:
     failed = 0
     total_render_s = 0.0
     for i, line in enumerate(lines, 1):
-        opus_out = args.output / line.relative_path
-        if args.skip_existing and opus_out.exists() and opus_out.stat().st_size > 0:
+        mp3_out = args.output / line.relative_path
+        if args.skip_existing and mp3_out.exists() and mp3_out.stat().st_size > 0:
             skipped += 1
             continue
 
@@ -192,7 +198,7 @@ def main() -> None:
             )
             elapsed = time.monotonic() - t
             total_render_s += elapsed
-            encode_opus(wav_tmp, opus_out)
+            encode_mp3(wav_tmp, mp3_out)
             wav_tmp.unlink(missing_ok=True)
             rendered += 1
             avg = total_render_s / rendered

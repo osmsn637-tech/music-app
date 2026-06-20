@@ -1,5 +1,6 @@
 songs/
 .venv/
+.venv-mac-automix/
 build/
 .claude/
 quick pick daynamic bg/
@@ -7,6 +8,11 @@ quick pick daynamic bg/
 # Large local artifacts
 data/*.pt
 data/*.tar.gz
+
+# AutoMix generated artifacts (sidecars + Demucs stems) — regenerated from
+# songs/ via tools/automix; shipped to the app via sync, not committed.
+analysis/
+stems/
 
 # Python
 __pycache__/

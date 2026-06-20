@@ -143,13 +143,17 @@ class AiDjQueueController extends StateNotifier<AiDjQueueState> {
   static const int _recentClipMemory = 12;
   final math.Random _clipRng = math.Random();
 
-  /// Crossfade duration when enabled.
+  /// Crossfade duration when the position pre-trigger advances. Matches
+  /// the NowPlayingController's `_autoMixWindow` so DJ-driven transitions
+  /// feel identical to the library/playlist auto-mix.
   static const Duration _crossfadeWindow = Duration(seconds: 4);
 
-  /// Disabled because just_audio's Android plugin doesn't reliably route
-  /// volume calls when two AudioPlayer instances coexist. User-initiated
-  /// nav uses the hard-cut path; auto-advance now also takes that path
-  /// via the natural-completion listener.
+  /// Kept OFF: the DJ model talks *between* songs — [playAt] stops the
+  /// outgoing deck before the host clip plays, so there's nothing left to
+  /// crossfade from. Turning this on armed a position pre-trigger that
+  /// advanced 4s early, hard-cutting the song and leaving the DJ talking
+  /// into dead air with a pointless fade-in. With it off, the queue
+  /// advances at natural completion (−400ms trim) — clean talk-between-songs.
   static const bool _crossfadeEnabled = false;
 
   /// When the current song's position crosses this, the queue advances
@@ -250,6 +254,10 @@ class AiDjQueueController extends StateNotifier<AiDjQueueState> {
       } catch (e) {
         debugPrint('[aidj] pre-DJ stop failed (non-fatal): $e');
       }
+      // Deck is stopped; neutralize the last position so the watchdog can't
+      // read a stale near-end value and fire a spurious advance while the DJ
+      // clip plays in the gap.
+      _lastPosition = Duration.zero;
     }
 
     if (voiceEnabled) {
@@ -275,12 +283,13 @@ class AiDjQueueController extends StateNotifier<AiDjQueueState> {
 
       final bankedLine = await _selectBankedLine(ctx);
       if (bankedLine != null) {
-        // Always wait for the DJ clip to finish before starting the next
-        // song. Previously we fire-and-forgot on mid-queue transitions,
-        // which made the DJ talk *over* the next song's intro.
+        // Talk *between* songs: wait for the clip before starting the next
+        // track so it never plays over the intro. EXCEPT on a user skip —
+        // there we fire-and-forget so the new song starts instantly (the clip
+        // rides the intro), keeping skip snappy instead of a multi-second wait.
         final played = await _playBankedLine(
           bankedLine,
-          awaitCompletion: true,
+          awaitCompletion: !cameFromSkip,
           crossfade: crossfade,
         );
         // Bail if the user triggered a different playAt while we awaited
@@ -357,7 +366,7 @@ class AiDjQueueController extends StateNotifier<AiDjQueueState> {
       try {
         final played = await player
             .play(line.bank, line.clip)
-            .timeout(const Duration(seconds: 12));
+            .timeout(const Duration(seconds: 6));
         if (played) {
           _rememberClip(line.clip.id);
           debugPrint('[aidj] played local voice-bank clip ${line.clip.id}');
@@ -390,6 +399,9 @@ class AiDjQueueController extends StateNotifier<AiDjQueueState> {
   Future<bool> next({bool crossfade = false}) async {
     final nextIndex = state.currentIndex + 1;
     if (nextIndex >= state.queue.length) {
+      // Past the end: no playAt will consume the skip flag, so clear it here
+      // or it leaks onto the next (unrelated) transition.
+      _pendingSkipFlag = false;
       state = state.copyWith(currentIndex: -1);
       return false;
     }
@@ -424,6 +436,12 @@ class AiDjQueueController extends StateNotifier<AiDjQueueState> {
 
   /// Stops queue playback without clearing the queue.
   void deactivate() {
+    // Clear timing/advance state so leaving the DJ can't strand an armed
+    // trigger that fires a stale advance on later, unrelated playback.
+    _trigger = null;
+    _advancing = false;
+    _lastDuration = null;
+    _lastPosition = Duration.zero;
     state = state.copyWith(currentIndex: -1);
   }
 
@@ -484,6 +502,12 @@ class AiDjQueueController extends StateNotifier<AiDjQueueState> {
   }
 
   void _onDuration(Duration? d) {
+    // Don't let non-DJ playback seed the trigger/duration fields.
+    if (!state.isActive) {
+      _trigger = null;
+      _lastDuration = null;
+      return;
+    }
     _trigger = null;
     _lastDuration = d;
     if (d == null || d == Duration.zero) return;
@@ -497,8 +521,11 @@ class AiDjQueueController extends StateNotifier<AiDjQueueState> {
   }
 
   void _onPosition(Duration pos) {
+    if (!state.isActive) {
+      _lastPosition = Duration.zero;
+      return;
+    }
     _lastPosition = pos;
-    if (!state.isActive) return;
     if (_advancing) return;
     final t = _trigger;
     if (t == null) return;
@@ -521,6 +548,14 @@ class AiDjQueueController extends StateNotifier<AiDjQueueState> {
     _posSub?.cancel();
     _durSub?.cancel();
     _bankSpeakingSub?.cancel();
+    // Detach the lockscreen / Bluetooth media-button closures — the handler is
+    // an app-global singleton that outlives us, and a stale closure would call
+    // into this disposed StateNotifier.
+    final handler = _ref.read(audioHandlerProvider);
+    if (handler != null) {
+      handler.onSkipNextRequested = null;
+      handler.onSkipPreviousRequested = null;
+    }
     super.dispose();
   }
 }

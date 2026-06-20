@@ -112,8 +112,7 @@ class PlayerExpansionScope extends StatefulWidget {
   static PlayerExpansionController of(BuildContext context) {
     final inh = context
         .dependOnInheritedWidgetOfExactType<_PlayerExpansionInherited>();
-    assert(inh != null,
-        'PlayerExpansionScope.of called outside the scope');
+    assert(inh != null, 'PlayerExpansionScope.of called outside the scope');
     return inh!.controller;
   }
 
@@ -122,9 +121,20 @@ class PlayerExpansionScope extends StatefulWidget {
   static PlayerExpansionController read(BuildContext context) {
     final inh = context
         .getInheritedWidgetOfExactType<_PlayerExpansionInherited>();
-    assert(inh != null,
-        'PlayerExpansionScope.read called outside the scope');
+    assert(inh != null, 'PlayerExpansionScope.read called outside the scope');
     return inh!.controller;
+  }
+
+  /// Like [read] but tolerates the scope being absent — returns null
+  /// instead of asserting. Pushed routes (settings, sync, playlist
+  /// detail) live above the home shell, so the scope isn't an ancestor
+  /// there; widgets that merely want to pause work when the player
+  /// covers them (e.g. [StageBackground]) use this to stay mountable
+  /// anywhere.
+  static PlayerExpansionController? maybeRead(BuildContext context) {
+    return context
+        .getInheritedWidgetOfExactType<_PlayerExpansionInherited>()
+        ?.controller;
   }
 
   @override

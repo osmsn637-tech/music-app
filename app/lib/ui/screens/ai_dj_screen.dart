@@ -7,9 +7,11 @@ import '../../core/services/providers.dart';
 import '../../features/ai_dj/ai_dj_service.dart';
 import '../../features/ai_dj/dj_mode.dart';
 import '../../features/ai_dj/providers.dart';
+import '../../features/player/providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/album_art.dart';
 import '../widgets/glass.dart';
+import '../widgets/glass_kit.dart';
 import '../../features/player/player_expansion_controller.dart';
 
 /// Flacko — the redesigned AI DJ screen.
@@ -60,21 +62,48 @@ class _AiDjScreenState extends ConsumerState<AiDjScreen> {
     super.dispose();
   }
 
+  static const _emptyLibSnack = SnackBar(
+    content: Text(
+      "Nothing to mix yet — sync your library from the profile "
+      "menu (top-right) first.",
+    ),
+  );
+
   void _onSubmitPrompt(DjMode fallback) {
     final text = _promptController.text.trim();
     if (text.isEmpty) return;
+    if (ref.read(aiDjQueueControllerProvider).loading) return;
     FocusScope.of(context).unfocus();
-    ref
-        .read(aiDjQueueControllerProvider.notifier)
-        .generateFromRequest(text, fallback);
+    _runRequest(text, fallback);
+  }
+
+  // Free-text request: build the queue, then actually PLAY it (the old code
+  // built a queue but never started it) and clear the field on success.
+  Future<void> _runRequest(String text, DjMode fallback) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final controller = ref.read(aiDjQueueControllerProvider.notifier);
+    await controller.generateFromRequest(text, fallback);
+    if (!mounted) return;
+    final queue = ref.read(aiDjQueueControllerProvider).queue;
+    if (queue.isNotEmpty) {
+      _promptController.clear();
+      await controller.playAt(0);
+    } else {
+      messenger.showSnackBar(_emptyLibSnack);
+    }
   }
 
   Future<void> _pickMood(DjMode mode) async {
+    if (ref.read(aiDjQueueControllerProvider).loading) return;
+    final messenger = ScaffoldMessenger.of(context);
     final controller = ref.read(aiDjQueueControllerProvider.notifier);
     await controller.generate(mode);
+    if (!mounted) return;
     final queue = ref.read(aiDjQueueControllerProvider).queue;
     if (queue.isNotEmpty) {
       await controller.playAt(0);
+    } else {
+      messenger.showSnackBar(_emptyLibSnack);
     }
   }
 
@@ -82,19 +111,29 @@ class _AiDjScreenState extends ConsumerState<AiDjScreen> {
   Widget build(BuildContext context) {
     final state = ref.watch(aiDjQueueControllerProvider);
     final defaultMode = ref.watch(defaultDjModeProvider);
-    final pickerMode =
-        state.mode == DjMode.general ? defaultMode : state.mode;
+    final pickerMode = state.mode == DjMode.general ? defaultMode : state.mode;
     final current = state.current;
     final hasQueue = state.queue.isNotEmpty;
+    final loading = state.loading;
+    final reallyPlaying =
+        ref.watch(playerStateStreamProvider).valueOrNull?.playing ?? false;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(
-          0, LumenTokens.topSafePad, 0, LumenTokens.bottomSafePad),
+        0,
+        LumenTokens.topSafePad,
+        0,
+        LumenTokens.bottomSafePad,
+      ),
       children: [
         // Header — eyebrow → Flacko display → pitch.
         const Padding(
-          padding: EdgeInsets.fromLTRB(LumenTokens.pagePad, 0,
-              LumenTokens.pagePad, 8),
+          padding: EdgeInsets.fromLTRB(
+            LumenTokens.pagePad,
+            0,
+            LumenTokens.pagePad,
+            8,
+          ),
           child: Text(
             '★ AI DJ · LIVE',
             style: TextStyle(
@@ -106,8 +145,12 @@ class _AiDjScreenState extends ConsumerState<AiDjScreen> {
           ),
         ),
         const Padding(
-          padding: EdgeInsets.fromLTRB(LumenTokens.pagePad, 0,
-              LumenTokens.pagePad, 8),
+          padding: EdgeInsets.fromLTRB(
+            LumenTokens.pagePad,
+            0,
+            LumenTokens.pagePad,
+            8,
+          ),
           child: Text(
             'Flacko',
             style: TextStyle(
@@ -119,8 +162,12 @@ class _AiDjScreenState extends ConsumerState<AiDjScreen> {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(LumenTokens.pagePad, 0,
-              LumenTokens.pagePad, 18),
+          padding: const EdgeInsets.fromLTRB(
+            LumenTokens.pagePad,
+            0,
+            LumenTokens.pagePad,
+            18,
+          ),
           child: SizedBox(
             width: 280,
             child: Text(
@@ -138,21 +185,30 @@ class _AiDjScreenState extends ConsumerState<AiDjScreen> {
         // "Tonight's Set" hero strip — present whether the queue is loaded
         // or not, since the Start pill doubles as the empty-state CTA.
         Padding(
-          padding: const EdgeInsets.fromLTRB(LumenTokens.pagePad, 0,
-              LumenTokens.pagePad, 18),
+          padding: const EdgeInsets.fromLTRB(
+            LumenTokens.pagePad,
+            0,
+            LumenTokens.pagePad,
+            18,
+          ),
           child: _NowMixingCard(
             onStart: () => _pickMood(pickerMode),
             current: current,
-            isPlaying: state.isActive,
-            onOpenPlayer: () =>
-                PlayerExpansionScope.read(context).expand(),
+            isActive: state.isActive,
+            playing: reallyPlaying,
+            loading: loading,
+            onOpenPlayer: () => PlayerExpansionScope.read(context).expand(),
           ),
         ),
 
         // "How are you feeling?" → mood grid.
         const Padding(
-          padding: EdgeInsets.fromLTRB(LumenTokens.pagePad, 0,
-              LumenTokens.pagePad, 14),
+          padding: EdgeInsets.fromLTRB(
+            LumenTokens.pagePad,
+            0,
+            LumenTokens.pagePad,
+            14,
+          ),
           child: Text(
             'How are you feeling?',
             style: TextStyle(
@@ -190,7 +246,11 @@ class _AiDjScreenState extends ConsumerState<AiDjScreen> {
         if (state.intent != null && state.intent!.describe().isNotEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(
-                LumenTokens.pagePad, 18, LumenTokens.pagePad, 0),
+              LumenTokens.pagePad,
+              18,
+              LumenTokens.pagePad,
+              0,
+            ),
             child: Wrap(
               spacing: 6,
               runSpacing: 6,
@@ -234,18 +294,19 @@ class _AiDjScreenState extends ConsumerState<AiDjScreen> {
                         gradient: LinearGradient(
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
-                          colors: [
-                            LumenTokens.orbViolet,
-                            LumenTokens.orbPink,
-                          ],
+                          colors: [LumenTokens.orbViolet, LumenTokens.orbPink],
                         ),
                       ),
                       child: const Icon(Icons.mic, size: 14),
                     ),
                     const SizedBox(width: 10),
-                    const Text('Host',
-                        style: TextStyle(
-                            fontWeight: FontWeight.w700, fontSize: 13)),
+                    const Text(
+                      'Host',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 10),
@@ -269,9 +330,15 @@ class _AiDjScreenState extends ConsumerState<AiDjScreen> {
         if (state.error != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(
-                LumenTokens.pagePad, 24, LumenTokens.pagePad, 0),
-            child: Text(state.error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              LumenTokens.pagePad,
+              24,
+              LumenTokens.pagePad,
+              0,
+            ),
+            child: Text(
+              state.error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
           ),
       ],
     );
@@ -285,32 +352,42 @@ class _NowMixingCard extends StatelessWidget {
   const _NowMixingCard({
     required this.onStart,
     required this.current,
-    required this.isPlaying,
+    required this.isActive,
+    required this.playing,
+    required this.loading,
     required this.onOpenPlayer,
   });
 
   final VoidCallback onStart;
   final AiDjQueueEntry? current;
-  final bool isPlaying;
+
+  /// DJ queue is running (index >= 0) — keeps the live strip up even when
+  /// merely paused, instead of falling back to the Start CTA.
+  final bool isActive;
+
+  /// Real transport playing/paused — drives the play/pause glyph.
+  final bool playing;
+  final bool loading;
   final VoidCallback onOpenPlayer;
 
   @override
   Widget build(BuildContext context) {
-    final showLive = current != null && isPlaying;
+    final showLive = current != null && isActive;
     return Glass(
       strong: true,
       borderRadius: LumenTokens.rXl,
       padding: const EdgeInsets.all(16),
       child: showLive
-          ? _LiveStrip(item: current!, onTap: onOpenPlayer)
-          : _StartStrip(onStart: onStart),
+          ? _LiveStrip(item: current!, playing: playing, onTap: onOpenPlayer)
+          : _StartStrip(onStart: onStart, loading: loading),
     );
   }
 }
 
 class _StartStrip extends StatelessWidget {
-  const _StartStrip({required this.onStart});
+  const _StartStrip({required this.onStart, required this.loading});
   final VoidCallback onStart;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) {
@@ -332,10 +409,7 @@ class _StartStrip extends StatelessWidget {
               SizedBox(height: 4),
               Text(
                 "Tonight's Set",
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                ),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
               ),
               SizedBox(height: 2),
               Text(
@@ -346,40 +420,12 @@ class _StartStrip extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 12),
-        InkWell(
-          borderRadius: BorderRadius.circular(LumenTokens.rPill),
-          onTap: onStart,
-          child: Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-            decoration: BoxDecoration(
-              color: LumenTokens.btnPillBg(context),
-              borderRadius: BorderRadius.circular(LumenTokens.rPill),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.4),
-                  blurRadius: 20,
-                  offset: const Offset(0, 6),
-                ),
-              ],
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.play_arrow,
-                    size: 14, color: LumenTokens.btnPillFg(context)),
-                const SizedBox(width: 6),
-                Text(
-                  'Start',
-                  style: TextStyle(
-                    color: LumenTokens.btnPillFg(context),
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13,
-                  ),
-                ),
-              ],
-            ),
-          ),
+        GlassButton(
+          label: loading ? 'Mixing…' : 'Start',
+          icon: Icons.play_arrow_rounded,
+          primary: true,
+          loading: loading,
+          onPressed: loading ? null : onStart,
         ),
       ],
     );
@@ -387,15 +433,19 @@ class _StartStrip extends StatelessWidget {
 }
 
 class _LiveStrip extends StatelessWidget {
-  const _LiveStrip({required this.item, required this.onTap});
+  const _LiveStrip({
+    required this.item,
+    required this.playing,
+    required this.onTap,
+  });
   final AiDjQueueEntry item;
+  final bool playing;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final s = item.song;
-    return InkWell(
-      borderRadius: BorderRadius.circular(LumenTokens.rXl),
+    return Pressable(
       onTap: onTap,
       child: Row(
         children: [
@@ -424,16 +474,21 @@ class _LiveStrip extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w700),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 Text(
-                  [s.artist ?? '', s.album ?? '']
-                      .where((t) => t.isNotEmpty)
-                      .join(' · '),
+                  [
+                    s.artist ?? '',
+                    s.album ?? '',
+                  ].where((t) => t.isNotEmpty).join(' · '),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                      fontSize: 12, color: LumenTokens.fgDimOf(context)),
+                    fontSize: 12,
+                    color: LumenTokens.fgDimOf(context),
+                  ),
                 ),
               ],
             ),
@@ -444,11 +499,12 @@ class _LiveStrip extends StatelessWidget {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: Colors.white.withValues(alpha: 0.10),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.10),
-              ),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
             ),
-            child: const Icon(Icons.play_arrow, size: 18),
+            child: Icon(
+              playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+              size: 18,
+            ),
           ),
         ],
       ),
@@ -471,73 +527,69 @@ class _MoodCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(LumenTokens.rXl),
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: LumenTokens.dFast,
-          curve: LumenTokens.easeOut,
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            gradient: spec.gradient,
-            borderRadius: BorderRadius.circular(LumenTokens.rXl),
-            border: Border.all(
-              color: selected
-                  ? Colors.white
-                  : Colors.white.withValues(alpha: 0.12),
-              width: selected ? 2 : 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.45),
-                blurRadius: 28,
-                offset: const Offset(0, 8),
-              ),
-            ],
+    return Pressable(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: LumenTokens.dFast,
+        curve: LumenTokens.easeOut,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: spec.gradient,
+          borderRadius: BorderRadius.circular(LumenTokens.rXl),
+          border: Border.all(
+            color: selected
+                ? Colors.white
+                : Colors.white.withValues(alpha: 0.12),
+            width: selected ? 2 : 1,
           ),
-          child: Stack(
-            children: [
-              // Internal sheen — same diagonal trick as Glass.
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(LumenTokens.rXl),
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          Colors.white.withValues(alpha: 0.18),
-                          Colors.transparent,
-                          Colors.transparent,
-                          Colors.black.withValues(alpha: 0.15),
-                        ],
-                        stops: const [0.0, 0.3, 0.7, 1.0],
-                      ),
+          boxShadow: [
+            BoxShadow(
+              color: spec.gradient.colors.last.withValues(alpha: 0.32),
+              blurRadius: 24,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Stack(
+          children: [
+            // Internal sheen — same diagonal trick as Glass.
+            Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(LumenTokens.rXl),
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        Colors.white.withValues(alpha: 0.18),
+                        Colors.transparent,
+                        Colors.transparent,
+                        Colors.black.withValues(alpha: 0.15),
+                      ],
+                      stops: const [0.0, 0.3, 0.7, 1.0],
                     ),
                   ),
                 ),
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Icon(spec.icon, size: 26, color: Colors.white),
-                  Text(
-                    spec.label,
-                    style: const TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.3,
-                      color: Colors.white,
-                    ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Icon(spec.icon, size: 26, color: Colors.white),
+                Text(
+                  spec.label,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.3,
+                    color: Colors.white,
                   ),
-                ],
-              ),
-            ],
-          ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -552,49 +604,27 @@ class _RequestField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Glass(
+    return GlassField(
+      controller: controller,
+      hint: 'Tell the DJ what you want…',
       borderRadius: LumenTokens.rPill,
-      padding: const EdgeInsets.fromLTRB(16, 4, 4, 4),
-      child: Row(
-        children: [
-          const Icon(Icons.auto_awesome, size: 16, color: LumenTokens.accent),
-          const SizedBox(width: 10),
-          Expanded(
-            child: TextField(
-              controller: controller,
-              textInputAction: TextInputAction.go,
-              onSubmitted: (_) => onSubmit(),
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-              decoration: InputDecoration(
-                isDense: true,
-                border: InputBorder.none,
-                hintText: 'Tell the DJ what you want…',
-                hintStyle: TextStyle(
-                  color: LumenTokens.fgDim2Of(context),
-                  fontSize: 14,
-                ),
-                contentPadding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-            ),
+      onSubmitted: (_) => onSubmit(),
+      leading: const Icon(
+        Icons.auto_awesome,
+        size: 16,
+        color: LumenTokens.accent,
+      ),
+      trailing: Pressable(
+        onTap: onSubmit,
+        child: Container(
+          width: 36,
+          height: 36,
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            color: LumenTokens.accent,
           ),
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(LumenTokens.rPill),
-              onTap: onSubmit,
-              child: Container(
-                width: 36,
-                height: 36,
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: LumenTokens.accent,
-                ),
-                child: const Icon(Icons.arrow_forward,
-                    size: 16, color: Colors.white),
-              ),
-            ),
-          ),
-        ],
+          child: const Icon(Icons.arrow_forward, size: 16, color: Colors.white),
+        ),
       ),
     );
   }
@@ -611,9 +641,7 @@ class _IntentChip extends StatelessWidget {
       decoration: BoxDecoration(
         color: LumenTokens.accent.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(LumenTokens.rXs),
-        border: Border.all(
-          color: LumenTokens.accent.withValues(alpha: 0.28),
-        ),
+        border: Border.all(color: LumenTokens.accent.withValues(alpha: 0.28)),
       ),
       child: Text(
         label,

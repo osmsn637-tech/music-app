@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../motion/lumen_route.dart';
 import '../screens/settings_screen.dart';
 import '../screens/sync_screen.dart';
 import 'glass.dart';
@@ -47,9 +48,9 @@ class ProfileSheet extends StatelessWidget {
               subtitle: 'Pull songs from your local Wi-Fi server',
               onTap: () {
                 Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SyncScreen()),
-                );
+                Navigator.of(
+                  context,
+                ).pushLumen((_) => const SyncScreen(), axis: LumenAxis.fade);
               },
             ),
             _Tile(
@@ -58,8 +59,9 @@ class ProfileSheet extends StatelessWidget {
               subtitle: 'Theme, voice, storage, history',
               onTap: () {
                 Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                Navigator.of(context).pushLumen(
+                  (_) => const SettingsScreen(),
+                  axis: LumenAxis.fade,
                 );
               },
             ),

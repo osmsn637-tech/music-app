@@ -4,12 +4,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/database/app_database.dart';
 import '../../features/library/library_actions.dart';
 import '../../features/library/providers.dart';
+import '../../features/nav/content_navigator_scope.dart';
 import '../../features/player/now_playing_controller.dart';
 import '../../features/player/providers.dart';
 import '../../features/playlists/providers.dart';
 import '../../features/player/player_expansion_controller.dart';
 import '../theme/app_theme.dart';
+import '../widgets/glass.dart';
+import '../widgets/glass_kit.dart';
 import '../widgets/playlist_cover.dart';
+import '../widgets/song_actions.dart';
 import '../widgets/song_tile.dart';
 
 class PlaylistDetailScreen extends ConsumerWidget {
@@ -36,29 +40,125 @@ class PlaylistDetailScreen extends ConsumerWidget {
     PlayerExpansionScope.read(context).expand();
   }
 
-  Future<void> _rename(BuildContext context, WidgetRef ref, PlaylistRow pl) async {
-    final controller = TextEditingController(text: pl.name);
-    final newName = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Rename playlist'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: 'Name'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+  /// Glass action sheet for the top-bar overflow button.
+  Future<void> _showMenu(
+    BuildContext context,
+    WidgetRef ref,
+    PlaylistRow pl,
+  ) async {
+    Widget action(
+      IconData icon,
+      String label,
+      VoidCallback onTap, {
+      Color? color,
+    }) {
+      return Pressable(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          child: Row(
+            children: [
+              Icon(icon, size: 20, color: color ?? LumenTokens.fg(context)),
+              const SizedBox(width: 14),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: color ?? LumenTokens.fg(context),
+                ),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('Save'),
+        ),
+      );
+    }
+
+    await showGlassSheet<void>(
+      context,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          action(Icons.edit_outlined, 'Rename', () {
+            Navigator.pop(context);
+            _rename(context, ref, pl);
+          }),
+          action(Icons.copy_all_outlined, 'Duplicate', () async {
+            Navigator.pop(context);
+            final messenger = ScaffoldMessenger.of(context);
+            await ref.read(playlistRepositoryProvider).duplicate(pl.id);
+            messenger.showSnackBar(
+              SnackBar(content: Text('Duplicated "${pl.name}"')),
+            );
+          }),
+          action(
+            Icons.delete_outline,
+            'Delete playlist',
+            () {
+              Navigator.pop(context);
+              _delete(context, ref, pl);
+            },
+            color: Theme.of(context).colorScheme.error,
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _rename(
+    BuildContext context,
+    WidgetRef ref,
+    PlaylistRow pl,
+  ) async {
+    final controller = TextEditingController(text: pl.name);
+    final newName = await showGlassDialog<String>(
+      context,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Rename playlist',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.3,
+              color: LumenTokens.fg(context),
+            ),
+          ),
+          const SizedBox(height: 16),
+          GlassField(
+            controller: controller,
+            autofocus: true,
+            hint: 'Name',
+            onSubmitted: (v) => Navigator.pop(context, v.trim()),
+          ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Expanded(
+                child: GlassButton(
+                  label: 'Cancel',
+                  expand: true,
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: GlassButton(
+                  label: 'Save',
+                  primary: true,
+                  expand: true,
+                  onPressed: () =>
+                      Navigator.pop(context, controller.text.trim()),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
     if (newName != null && newName.isNotEmpty && newName != pl.name) {
       await ref.read(playlistRepositoryProvider).rename(pl.id, newName);
     }
@@ -69,26 +169,14 @@ class PlaylistDetailScreen extends ConsumerWidget {
     WidgetRef ref,
     PlaylistRow pl,
   ) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete playlist?'),
-        content: Text(
-          'Removes "${pl.name}". The songs themselves are not deleted.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton.tonal(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final confirm = await showGlassConfirm(
+      context,
+      title: 'Delete playlist?',
+      body: 'Removes "${pl.name}". The songs themselves are not deleted.',
+      confirmLabel: 'Delete',
+      destructive: true,
     );
-    if (confirm != true) return;
+    if (!confirm) return;
     await ref.read(playlistRepositoryProvider).delete(pl.id);
     if (!context.mounted) return;
     Navigator.of(context).pop();
@@ -96,7 +184,9 @@ class PlaylistDetailScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final pl = ref.watch(allPlaylistsProvider).maybeWhen(
+    final pl = ref
+        .watch(allPlaylistsProvider)
+        .maybeWhen(
           data: (list) => list.where((p) => p.id == playlistId).firstOrNull,
           orElse: () => null,
         );
@@ -104,29 +194,27 @@ class PlaylistDetailScreen extends ConsumerWidget {
     final nowPlayingId = ref.watch(nowPlayingProvider)?.id;
     final isPlaying =
         ref.watch(playerStateStreamProvider).valueOrNull?.playing ?? false;
+    final chrome = hasPersistentChrome(context);
+    final bottomPad = chrome ? LumenTokens.bottomSafePad : 40.0;
 
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        actions: [
-          if (pl != null)
-            PopupMenuButton<String>(
-              onSelected: (action) async {
-                if (action == 'rename') await _rename(context, ref, pl);
-                if (action == 'delete') {
-                  if (!context.mounted) return;
-                  await _delete(context, ref, pl);
-                }
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'rename', child: Text('Rename')),
-                PopupMenuItem(value: 'delete', child: Text('Delete')),
-              ],
-            ),
-        ],
+    return StageScaffold(
+      actions: [
+        if (pl != null)
+          GlassIconButton(
+            icon: Icons.more_horiz,
+            onTap: () => _showMenu(context, ref, pl),
+          ),
+      ],
+      floatingActionButton: Padding(
+        // Lift the FAB above the persistent nav + mini player (mobile only).
+        padding: EdgeInsets.only(bottom: chrome ? 96 : 0),
+        child: GlassButton(
+          label: 'Add songs',
+          icon: Icons.add,
+          primary: true,
+          onPressed: () => _showAddSongs(context, ref),
+        ),
       ),
-      extendBodyBehindAppBar: true,
       body: songs.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
@@ -150,14 +238,21 @@ class PlaylistDetailScreen extends ConsumerWidget {
           );
           if (list.isEmpty) {
             return ListView(
-              children: [header, _Empty(playlistId: playlistId)],
+              padding: EdgeInsets.only(bottom: bottomPad),
+              children: [
+                header,
+                _Empty(playlistId: playlistId),
+              ],
             );
           }
           return ReorderableListView.builder(
+            padding: EdgeInsets.only(bottom: bottomPad),
             header: header,
             itemCount: list.length,
             onReorder: (oldIndex, newIndex) {
-              ref.read(playlistRepositoryProvider).reorder(
+              ref
+                  .read(playlistRepositoryProvider)
+                  .reorder(
                     playlistId: playlistId,
                     oldIndex: oldIndex,
                     newIndex: newIndex,
@@ -177,11 +272,18 @@ class PlaylistDetailScreen extends ConsumerWidget {
                   // playback has stopped — falling through to _openSong
                   // restarts it instead of silently opening an empty player.
                   if (active && isPlaying) {
-                    PlayerExpansionScope.read(context).expand();
+                    PlayerExpansionScope.maybeRead(context)?.expand();
                   } else {
                     _openSong(context, ref, list, i);
                   }
                 },
+                onLongPress: () => SongActionsSheet.show(
+                  context,
+                  song,
+                  onRemoveFromPlaylist: () => ref
+                      .read(playlistRepositoryProvider)
+                      .removeSong(playlistId: playlistId, songId: song.id),
+                ),
                 trailing: ReorderableDragStartListener(
                   index: i,
                   child: const Padding(
@@ -193,11 +295,6 @@ class PlaylistDetailScreen extends ConsumerWidget {
             },
           );
         },
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        icon: const Icon(Icons.add),
-        label: const Text('Add songs'),
-        onPressed: () => _showAddSongs(context, ref),
       ),
     );
   }
@@ -248,12 +345,12 @@ class _PlaylistHeader extends StatelessWidget {
       if (totalMs > 0) _formatDuration(totalMs),
     ].join(', ');
 
-    final topInset = MediaQuery.of(context).padding.top + kToolbarHeight;
-
     return Padding(
-      padding: EdgeInsets.fromLTRB(
+      // The glass top bar (StageScaffold) already clears the status bar,
+      // so the header just needs a little breathing room above the cover.
+      padding: const EdgeInsets.fromLTRB(
         LumenTokens.pagePad,
-        topInset + 8,
+        8,
         LumenTokens.pagePad,
         20,
       ),
@@ -315,95 +412,25 @@ class _PlaylistHeader extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _PlayPillButton(
+              GlassButton(
                 icon: Icons.play_arrow_rounded,
                 label: 'Play',
-                onTap: onPlay,
+                primary: true,
+                onPressed: onPlay,
               ),
               const SizedBox(width: 12),
-              _IconCircleButton(
-                icon: Icons.shuffle_rounded,
-                onTap: onShuffle,
+              Opacity(
+                opacity: onShuffle == null ? 0.4 : 1,
+                child: GlassIconButton(
+                  icon: Icons.shuffle_rounded,
+                  size: 52,
+                  iconSize: 22,
+                  onTap: onShuffle,
+                ),
               ),
             ],
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _PlayPillButton extends StatelessWidget {
-  const _PlayPillButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final enabled = onTap != null;
-    return Opacity(
-      opacity: enabled ? 1 : 0.4,
-      child: Material(
-        color: LumenTokens.accent,
-        borderRadius: BorderRadius.circular(999),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(999),
-          child: Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 24, color: Colors.white),
-                const SizedBox(width: 6),
-                Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                    letterSpacing: 0.2,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _IconCircleButton extends StatelessWidget {
-  const _IconCircleButton({required this.icon, required this.onTap});
-
-  final IconData icon;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final enabled = onTap != null;
-    return Opacity(
-      opacity: enabled ? 1 : 0.4,
-      child: Material(
-        color: Colors.white.withValues(alpha: 0.08),
-        shape: const CircleBorder(),
-        child: InkWell(
-          onTap: onTap,
-          customBorder: const CircleBorder(),
-          child: SizedBox(
-            width: 48,
-            height: 48,
-            child: Icon(icon, size: 22, color: LumenTokens.fg(context)),
-          ),
-        ),
       ),
     );
   }
@@ -427,43 +454,72 @@ class _AddSongsSheet extends ConsumerWidget {
       expand: false,
       initialChildSize: 0.6,
       maxChildSize: 0.9,
-      builder: (ctx, scroll) => Column(
-        children: [
-          const Padding(
-            padding: EdgeInsets.all(16),
-            child: Text('Add songs'),
-          ),
-          Expanded(
-            child: all.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(child: Text('Error: $e')),
-              data: (songs) => ListView.builder(
-                controller: scroll,
-                itemCount: songs.length,
-                itemBuilder: (context, i) {
-                  final song = songs[i];
-                  final already = inIds.contains(song.id);
-                  return SongTile(
-                    song: song,
-                    trailing: already
-                        ? const Icon(Icons.check, size: 20)
-                        : const Icon(Icons.add),
-                    onTap: already
-                        ? null
-                        : () async {
-                            await ref
-                                .read(libraryActionsProvider)
-                                .addToPlaylist(
-                                  playlistId: playlistId,
-                                  songId: song.id,
-                                );
-                          },
-                  );
-                },
+      builder: (ctx, scroll) => Glass(
+        strong: true,
+        shape: const BorderRadius.vertical(top: Radius.circular(24)),
+        child: Column(
+          children: [
+            Container(
+              width: 36,
+              height: 4,
+              margin: const EdgeInsets.only(top: 10, bottom: 6),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.25),
+                borderRadius: BorderRadius.circular(2),
               ),
             ),
-          ),
-        ],
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Add songs',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.3,
+                    color: LumenTokens.fg(context),
+                  ),
+                ),
+              ),
+            ),
+            Expanded(
+              child: all.when(
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (e, _) => Center(child: Text('Error: $e')),
+                data: (songs) => ListView.builder(
+                  controller: scroll,
+                  padding: const EdgeInsets.only(bottom: 12),
+                  itemCount: songs.length,
+                  itemBuilder: (context, i) {
+                    final song = songs[i];
+                    final already = inIds.contains(song.id);
+                    return SongTile(
+                      song: song,
+                      trailing: Icon(
+                        already ? Icons.check_rounded : Icons.add_rounded,
+                        size: 20,
+                        color: already
+                            ? LumenTokens.accent
+                            : LumenTokens.fgDimOf(context),
+                      ),
+                      onTap: already
+                          ? null
+                          : () async {
+                              await ref
+                                  .read(libraryActionsProvider)
+                                  .addToPlaylist(
+                                    playlistId: playlistId,
+                                    songId: song.id,
+                                  );
+                            },
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -476,23 +532,31 @@ class _Empty extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.queue_music, size: 96, color: scheme.onSurfaceVariant),
+            Icon(
+              Icons.queue_music,
+              size: 88,
+              color: LumenTokens.fgDim2Of(context),
+            ),
             const SizedBox(height: 16),
             Text(
               'No songs in this playlist yet',
-              style: Theme.of(context).textTheme.titleMedium,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: LumenTokens.fg(context),
+              ),
             ),
             const SizedBox(height: 8),
             Text(
               'Tap "Add songs" to pick from your library.',
-              style: TextStyle(color: scheme.onSurfaceVariant),
+              textAlign: TextAlign.center,
+              style: TextStyle(color: LumenTokens.fgDimOf(context)),
             ),
           ],
         ),

@@ -71,6 +71,23 @@ Future<Uint8List> _renderLyricCard({
   }
 }
 
+/// Anchor rect for the iOS share popover. iPad REQUIRES a non-null
+/// `sharePositionOrigin` or share_plus throws / presents blank; iPhone is
+/// more forgiving but Apple still wants one. Derives it from the invoking
+/// widget, with a centred-screen fallback so it's never null.
+Rect shareOriginFor(BuildContext context) {
+  final box = context.findRenderObject() as RenderBox?;
+  if (box != null && box.hasSize) {
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
+  final size = MediaQuery.of(context).size;
+  return Rect.fromCenter(
+    center: Offset(size.width / 2, size.height / 2),
+    width: 1,
+    height: 1,
+  );
+}
+
 /// Renders an Apple-Music-style lyric card and fires the OS share sheet
 /// with the PNG.
 Future<void> shareLyricsAsImage({
@@ -80,6 +97,9 @@ Future<void> shareLyricsAsImage({
   required List<Color> colors,
 }) async {
   if (lines.isEmpty) return;
+  // Capture the popover anchor BEFORE any await — the context may unmount
+  // (or its render box change) across the async render gap.
+  final origin = shareOriginFor(context);
   final png = await _renderLyricCard(
     context: context, song: song, lines: lines, colors: colors,
   );
@@ -92,6 +112,7 @@ Future<void> shareLyricsAsImage({
   await Share.shareXFiles(
     [XFile(file.path, mimeType: 'image/png')],
     subject: '${song.title} — ${song.artist ?? ""}'.trim(),
+    sharePositionOrigin: origin,
   );
 }
 

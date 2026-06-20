@@ -43,3 +43,22 @@ services:
     profiles: ["tools"]
     volumes:
       - ./content:/content
+
+  # Live Connect — real-time cross-device playback handoff (WebSocket).
+  # Long-running like the music/piper servers (idle when nobody's connected),
+  # so NOT behind the "tools" profile. Every device types the same ROOM_CODE
+  # into the app's Settings → Live Connect to join the same handoff group.
+  #
+  # Same unauthenticated-LAN posture as the music + piper servers: do NOT
+  # expose 8002 to the public internet as plain ws://. For a cloud box, put it
+  # behind a TLS reverse proxy and point the app at wss://<host>/connect/ws.
+  connect:
+    build: ./connect
+    container_name: connect
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    environment:
+      - ROOM_CODE=${ROOM_CODE:-changeme}
+    volumes:
+      - ./connect/state:/state   # session snapshot survives restarts

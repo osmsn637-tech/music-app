@@ -1350,10 +1350,70 @@ def find_audio_for(song_id: str) -> Optional[Path]:
     return None
 
 
+# Lazily-built audio-separator instance + a one-shot disable flag. Loading a
+# RoFormer model is expensive, so we build the Separator once per run and
+# reuse it across every track. If RoFormer turns out to be unavailable (import
+# error, model download failure, OOM), we flip _roformer_disabled and use
+# demucs for the rest of the run instead of re-trying the broken path on every
+# song.
+_separator = None
+_roformer_disabled = False
+
+# Mel-Band RoFormer vocals model — noticeably cleaner vocal SDR than htdemucs,
+# which tightens word-level forced alignment downstream. Swap to a BS-RoFormer
+# checkpoint (e.g. "model_bs_roformer_ep_317_sdr_12.9755.ckpt") for the highest
+# quality at higher CPU cost, or keep this lighter model for speed. NOTE: on
+# CPU (this container has no GPU) RoFormer is slow — minutes per track on the
+# first run while the model also downloads; demucs fallback keeps things moving
+# if that's too heavy for your box.
+_ROFORMER_MODEL = "vocals_mel_band_roformer.ckpt"
+
+
 def _isolate_vocals(audio_path: Path) -> Path:
-    """Run demucs on [audio_path] and return the path to the isolated
-    vocals .wav stem. Caches in /tmp/demucs/. Raises on failure (caller
-    falls back to the raw mp3)."""
+    """Return the path to an isolated vocals .wav for [audio_path].
+
+    Prefers a Mel-Band RoFormer model via `audio-separator` (cleaner vocals →
+    tighter alignment); transparently falls back to demucs if RoFormer is
+    unavailable or errors. Caches per-track so re-runs are free. Raises only if
+    BOTH backends fail (the caller then falls back to the raw mp3)."""
+    global _roformer_disabled
+    sep_root = Path("/tmp/sep")
+    sep_root.mkdir(parents=True, exist_ok=True)
+    cached = sep_root / f"{audio_path.stem}_vocals.wav"
+    if cached.exists():
+        return cached
+    if not _roformer_disabled:
+        try:
+            return _isolate_vocals_roformer(audio_path, sep_root, cached)
+        except Exception as e:
+            print(f"      RoFormer separation unavailable "
+                  f"({type(e).__name__}: {e}); using demucs for this run",
+                  flush=True)
+            _roformer_disabled = True
+    return _isolate_vocals_demucs(audio_path)
+
+
+def _isolate_vocals_roformer(audio_path: Path, sep_root: Path,
+                             cached: Path) -> Path:
+    """Isolate vocals with a Mel-Band RoFormer model via audio-separator.
+    Reuses a single module-level Separator across calls."""
+    global _separator
+    from audio_separator.separator import Separator
+    if _separator is None:
+        _separator = Separator(output_dir=str(sep_root), output_format="WAV")
+        _separator.load_model(model_filename=_ROFORMER_MODEL)
+    # Pin the vocals output name so the cache path is deterministic (the model
+    # also emits an instrumental stem under a default name, which we ignore).
+    _separator.separate(str(audio_path), {"Vocals": cached.stem})
+    if cached.exists():
+        return cached
+    raise RuntimeError(
+        f"audio-separator produced no vocals stem for {audio_path.name}")
+
+
+def _isolate_vocals_demucs(audio_path: Path) -> Path:
+    """Fallback separator: run demucs and return the isolated vocals .wav
+    stem. Caches in /tmp/demucs/. Raises on failure."""
     import subprocess
     out_root = Path("/tmp/demucs")
     out_root.mkdir(parents=True, exist_ok=True)
@@ -1486,22 +1546,396 @@ def transcribe_missing(
     return written
 
 
+# --- word-level alignment + speaker diarization -----------------------------
+#
+# Pipeline:
+#   demucs vocals  →  whisperx.align(LRC text, vocals)  →  per-word timings
+#                                       │
+#                                       └→ pyannote diarization (opt-in,
+#                                          needs HF_TOKEN) → per-word speaker
+#   then:
+#     - per-word RMS on vocals → flag {adlib} lines (text vocab OR quiet)
+#     - majority-vote speaker per line → {spk=N} tag + [ar:...] name map
+#
+# Output is "enhanced LRC" — backward-compatible with line-level parsers
+# (leading [mm:ss.xx] still works) but adds <mm:ss.xx>word tags and an
+# optional {attr,attr} block right after the line stamp.
+
+_ADLIB_VOCAB = {
+    "yeah", "yeh", "yuh", "uh", "uhh", "ah", "ahh", "ay", "ayy", "ayyy",
+    "oh", "ohh", "huh", "hmm", "mm", "mmm", "skrt", "skrrt", "brr", "brrr",
+    "gang", "woo", "wooh", "grr", "haha", "bah", "ooh", "ooo", "shh",
+    "psh", "tssh", "yo", "okay", "ok", "damn", "boom", "pow", "what",
+    "phew", "wow", "swoosh", "uh-huh", "uhuh", "mhm",
+}
+
+
+def _is_adlib_text(text: str) -> bool:
+    stripped = text.strip()
+    # LRCLib convention: fully-parenthesized lines are background vocals.
+    # Catches "(Straight up)", "(A lot)", "(I do)" etc. — single-paren-pair
+    # check (so we don't mis-fire on lines with two parens groups).
+    if (
+        stripped.startswith("(")
+        and stripped.endswith(")")
+        and stripped.count("(") == 1
+        and stripped.count(")") == 1
+    ):
+        return True
+    # Vocab match: short line entirely of common adlib words.
+    cleaned = re.sub(r"[^\w\s'-]", " ", stripped).strip().lower()
+    if not cleaned:
+        return False
+    words = cleaned.split()
+    if len(words) == 0 or len(words) > 4:
+        return False
+    return all(w in _ADLIB_VOCAB for w in words)
+
+
+def _word_rms(audio_np, sr: int, t_start: float, t_end: float) -> float:
+    import numpy as np
+    a = max(0, int(t_start * sr))
+    b = min(len(audio_np), int(t_end * sr))
+    if b - a < 16:
+        return 0.0
+    seg = audio_np[a:b]
+    return float(np.sqrt(np.mean(seg.astype("float32") ** 2)))
+
+
+def _format_lrc_time(t):
+    if t is None or t < 0:
+        t = 0.0
+    m = int(t) // 60
+    s = t - m * 60
+    return f"{m:02d}:{s:05.2f}"
+
+
+def _parse_existing_lrc(lrc_text: str):
+    """Returns list of (start_seconds, text) for each timestamped line."""
+    out = []
+    stamp = re.compile(r"\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]")
+    for raw in lrc_text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith(";"):
+            continue
+        if re.match(r"^\[[a-zA-Z]{2,}:", line):
+            continue
+        stamps = list(stamp.finditer(line))
+        if not stamps:
+            continue
+        text = line[stamps[-1].end():].strip()
+        text = re.sub(r"^\{[^}]*\}", "", text).strip()
+        text = re.sub(r"<\d{1,3}:\d{1,2}[.:]\d{1,3}>", "", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        for m in stamps:
+            mm = int(m.group(1))
+            ss = int(m.group(2))
+            frac = m.group(3) or "0"
+            frac_ms = int(frac.ljust(3, "0")[:3])
+            t = mm * 60 + ss + frac_ms / 1000.0
+            out.append((t, text))
+    out.sort(key=lambda x: x[0])
+    return out
+
+
+def _has_word_timings(lrc_text: str) -> bool:
+    return bool(re.search(r"<\d{1,3}:\d{1,2}[.:]\d{1,3}>", lrc_text))
+
+
+_ALIGN_MODEL = None
+_ALIGN_META = None
+_DIARIZE_PIPELINE = None
+
+
+def _get_align_model(device: str = "cpu"):
+    global _ALIGN_MODEL, _ALIGN_META
+    if _ALIGN_MODEL is None:
+        import whisperx
+        print("      loading whisperx alignment model (one-time)...",
+              flush=True)
+        _ALIGN_MODEL, _ALIGN_META = whisperx.load_align_model(
+            language_code="en", device=device,
+        )
+    return _ALIGN_MODEL, _ALIGN_META
+
+
+def _get_diarize_pipeline(device, hf_token):
+    global _DIARIZE_PIPELINE
+    if _DIARIZE_PIPELINE is None:
+        if not hf_token:
+            return None
+        import whisperx
+        print("      loading pyannote diarization pipeline (one-time)...",
+              flush=True)
+        _DIARIZE_PIPELINE = whisperx.diarize.DiarizationPipeline(
+            use_auth_token=hf_token, device=device,
+        )
+    return _DIARIZE_PIPELINE
+
+
+def align_words_in_lrc(audio_path, lrc_text, *, artists, diarize,
+                       hf_token=None):
+    """Forced-align the lines in [lrc_text] against the vocal stem of
+    [audio_path]. Returns enhanced LRC with <word> tags + {adlib}/{spk=N}
+    attributes."""
+    import whisperx
+    import numpy as np
+
+    device = "cpu"
+    parsed = _parse_existing_lrc(lrc_text)
+    if not parsed:
+        return lrc_text
+
+    segments = []
+    for i, (t, text) in enumerate(parsed):
+        t_end = parsed[i + 1][0] if i + 1 < len(parsed) else t + 5.0
+        if not text:
+            continue
+        segments.append({"start": t, "end": t_end, "text": text})
+    if not segments:
+        return lrc_text
+
+    try:
+        vocals = _isolate_vocals(audio_path)
+    except Exception as e:
+        print(f"      demucs failed ({type(e).__name__}: {e}); using raw mp3",
+              flush=True)
+        vocals = audio_path
+
+    audio = whisperx.load_audio(str(vocals))
+    sr = 16000
+
+    align_model, align_meta = _get_align_model(device)
+    aligned = whisperx.align(
+        segments, align_model, align_meta, audio, device,
+        return_char_alignments=False,
+    )
+
+    if diarize and hf_token:
+        try:
+            pipeline = _get_diarize_pipeline(device, hf_token)
+            if pipeline is not None:
+                max_spk = max(2, min(len(artists) + 1, 5))
+                diar_segments = pipeline(
+                    str(vocals), min_speakers=1, max_speakers=max_spk,
+                )
+                aligned = whisperx.assign_word_speakers(
+                    diar_segments, aligned,
+                )
+        except Exception as e:
+            print(f"      diarize failed ({type(e).__name__}: {e}); "
+                  f"continuing without speakers", flush=True)
+
+    all_rms = []
+    for seg in aligned.get("segments", []):
+        for w in seg.get("words", []):
+            ws, we = w.get("start"), w.get("end")
+            if ws is None or we is None:
+                continue
+            r = _word_rms(audio, sr, ws, we)
+            if r > 0:
+                all_rms.append(r)
+    song_median_rms = float(np.median(all_rms)) if all_rms else 0.0
+
+    out_lines = []
+    if artists:
+        out_lines.append(f"[ar:{','.join(artists)}]")
+
+    speaker_to_idx = {}
+    last_speaker_idx = None
+
+    for seg in aligned.get("segments", []):
+        words = seg.get("words", [])
+        line_start = seg.get("start", 0.0) or 0.0
+        text = (seg.get("text") or "").strip()
+        if not words:
+            # WhisperX couldn't align this segment (often happens on very
+            # short ad-lib lines like "(A lot)" where the CTC backtracker
+            # has too little audio context). Still apply the text-only
+            # adlib heuristic so the UI renders these dim/parenthesized
+            # instead of as a full main-vocal line.
+            attr_fail = "{adlib}" if _is_adlib_text(text) else ""
+            out_lines.append(
+                f"[{_format_lrc_time(line_start)}]{attr_fail}{text}"
+            )
+            continue
+
+        line_rms_vals = []
+        for w in words:
+            ws, we = w.get("start"), w.get("end")
+            if ws is None or we is None:
+                continue
+            r = _word_rms(audio, sr, ws, we)
+            if r > 0:
+                line_rms_vals.append(r)
+        line_mean_rms = float(np.mean(line_rms_vals)) if line_rms_vals else 0.0
+        is_quiet_short = (
+            song_median_rms > 0
+            and line_mean_rms > 0
+            and line_mean_rms < 0.55 * song_median_rms
+            and len(words) <= 4
+        )
+        is_adlib = _is_adlib_text(text) or is_quiet_short
+
+        line_speaker_idx = None
+        if diarize:
+            counts = {}
+            for w in words:
+                lbl = w.get("speaker")
+                if lbl:
+                    counts[lbl] = counts.get(lbl, 0) + 1
+            if counts:
+                top = max(counts, key=counts.get)
+                if top not in speaker_to_idx:
+                    speaker_to_idx[top] = len(speaker_to_idx)
+                line_speaker_idx = speaker_to_idx[top]
+
+        attrs = []
+        if is_adlib:
+            attrs.append("adlib")
+        if (
+            line_speaker_idx is not None
+            and line_speaker_idx != last_speaker_idx
+        ):
+            attrs.append(f"spk={line_speaker_idx}")
+            last_speaker_idx = line_speaker_idx
+        attr_str = "{" + ",".join(attrs) + "}" if attrs else ""
+
+        pieces = [f"[{_format_lrc_time(line_start)}]{attr_str}"]
+        last_end = line_start
+        for w in words:
+            ws = w.get("start")
+            wt = (w.get("word") or "").strip()
+            if not wt:
+                continue
+            if ws is None:
+                ws = last_end
+            pieces.append(f"<{_format_lrc_time(ws)}>{wt} ")
+            last_end = w.get("end", ws) or ws
+        pieces.append(f"<{_format_lrc_time(last_end)}>")
+        out_lines.append("".join(pieces).rstrip())
+
+    return "\n".join(out_lines) + "\n"
+
+
+def align_missing_words(sidecars, *, dry_run, verbose, diarize,
+                        hf_token=None, force=False, max_count=None,
+                        song_filter=None):
+    """Run forced word alignment on every song whose .lrc is still
+    line-level. Idempotent — skips files that already have <word> tags
+    unless [force]. Stops after [max_count] songs if provided.
+    Filters by [song_filter] substring match against the song id."""
+    pending = []
+    for sc in sidecars:
+        if song_filter and song_filter not in sc.stem:
+            continue
+        lrc_path = LYRICS_DIR / f"{sc.stem}.lrc"
+        if not lrc_path.exists():
+            continue
+        text = lrc_path.read_text(encoding="utf-8", errors="replace")
+        if _has_word_timings(text) and not force:
+            continue
+        pending.append((sc, lrc_path, text))
+
+    if max_count is not None:
+        pending = pending[:max_count]
+
+    print(
+        f"  align: {len(pending)} song(s) need word-level timings "
+        f"(diarize={diarize})",
+        flush=True,
+    )
+    if not pending:
+        return 0
+    if diarize and not hf_token:
+        print(
+            "      warning: --diarize set but HF_TOKEN env var is empty; "
+            "speakers will be skipped (still get adlibs + word timings)",
+            flush=True,
+        )
+
+    written = 0
+    for i, (sc, lrc_path, text) in enumerate(pending, start=1):
+        song_id = sc.stem
+        audio = find_audio_for(song_id)
+        if audio is None:
+            print(
+                f"  [{i}/{len(pending)}] {song_id}: no audio file found",
+                file=sys.stderr, flush=True,
+            )
+            continue
+        try:
+            data = json.loads(sc.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+        title = data.get("title") or song_id
+        artist_str = data.get("artist") or ""
+        artists = _split_multi_artist(artist_str) if artist_str else []
+        print(f"  [{i}/{len(pending)}] {title!r}: aligning"
+              + (f" ({', '.join(artists)})" if artists else "")
+              + "...", flush=True)
+        try:
+            enhanced = align_words_in_lrc(
+                audio, text,
+                artists=artists,
+                diarize=diarize,
+                hf_token=hf_token,
+            )
+        except Exception as e:
+            print(f"      ! align failed: {e}", file=sys.stderr, flush=True)
+            continue
+        n_words = enhanced.count("<")
+        if dry_run:
+            print(f"      (dry) would update {lrc_path.name} "
+                  f"({n_words} word tags)", flush=True)
+            written += 1
+            continue
+        lrc_path.write_text(enhanced, encoding="utf-8")
+        print(f"      wrote {lrc_path.name} ({n_words} word tags)",
+              flush=True)
+        written += 1
+    return written
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         "--only",
         action="append",
-        choices=["titles", "artwork", "lyrics", "artists", "transcribe"],
+        choices=["titles", "artwork", "lyrics", "artists", "transcribe",
+                 "align"],
         help="Restrict to one or more passes (can be repeated). Default: "
-             "everything except transcribe (which is opt-in because it "
-             "loads a Whisper model and runs CPU-heavy inference).",
+             "everything except transcribe and align (both are CPU-heavy "
+             "and opt-in).",
     )
     parser.add_argument(
         "--whisper-model",
         default="small",
         help="faster-whisper model id for the transcribe pass "
              "(tiny/base/small/medium/large-v3). Default: small.",
+    )
+    parser.add_argument(
+        "--diarize",
+        action="store_true",
+        help="During the align pass, also run pyannote speaker diarization "
+             "to tag each line with {spk=N}. Requires HF_TOKEN env var.",
+    )
+    parser.add_argument(
+        "--force-align",
+        action="store_true",
+        help="Re-run alignment on files that already have word timings.",
+    )
+    parser.add_argument(
+        "--align-max",
+        type=int,
+        default=None,
+        help="Stop the align pass after N songs (smoke-test guard).",
+    )
+    parser.add_argument(
+        "--align-song",
+        default=None,
+        help="Restrict the align pass to song ids containing this substring.",
     )
     parser.add_argument(
         "--base-url",
@@ -1556,7 +1990,7 @@ def main() -> int:
     print(f"Repairing {len(sidecars)} sidecar(s) — passes: {', '.join(passes)}"
           + ("  [dry run]" if args.dry_run else ""))
     counts = {"titles": 0, "artwork": 0, "lyrics": 0, "artists": 0,
-              "transcribe": 0, "scanned": len(sidecars)}
+              "transcribe": 0, "align": 0, "scanned": len(sidecars)}
 
     # Titles + lyrics still iterate per sidecar. Artwork now runs as a
     # single grouped pass (album-level iTunes lookup, one per album) after
@@ -1617,11 +2051,28 @@ def main() -> int:
             model_name=args.whisper_model,
         )
 
+    # Word-level forced alignment (+ optional diarization). Reads
+    # HF_TOKEN from env so it doesn't show up in shell history.
+    if "align" in passes:
+        import os
+        hf_token = os.environ.get("HF_TOKEN") or None
+        counts["align"] = align_missing_words(
+            sidecars,
+            dry_run=args.dry_run,
+            verbose=verbose,
+            diarize=args.diarize,
+            hf_token=hf_token,
+            force=args.force_align,
+            max_count=args.align_max,
+            song_filter=args.align_song,
+        )
+
     print(
         f"\ndone — titles cleaned: {counts['titles']}, "
         f"artwork added: {counts['artwork']}, "
         f"lyrics added: {counts['lyrics']}, "
         f"transcribed: {counts['transcribe']}, "
+        f"aligned: {counts['align']}, "
         f"artists added: {counts['artists']} "
         f"(of {counts['scanned']} sidecars scanned)"
     )

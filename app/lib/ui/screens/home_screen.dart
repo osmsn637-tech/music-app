@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/utils/album_colors.dart';
+import '../motion/lumen_route.dart';
+import '../motion/staggered_appear.dart';
 import '../../data/database/app_database.dart';
 import '../../features/library/album_colors_provider.dart';
 import '../../features/library/home_providers.dart';
@@ -77,7 +79,8 @@ class HomeScreen extends ConsumerWidget {
               child: const Text('Cancel'),
             ),
             FilledButton(
-              onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+              onPressed: () =>
+                  Navigator.of(context).pop(controller.text.trim()),
               child: const Text('Create'),
             ),
           ],
@@ -94,11 +97,11 @@ class HomeScreen extends ConsumerWidget {
     final now = DateTime.now();
     final recents = ref.watch(recentlyPlayedProvider).valueOrNull ?? const [];
     final added = ref.watch(recentlyAddedProvider).valueOrNull ?? const [];
-    final favorites =
-        ref.watch(favoriteSongsProvider).valueOrNull ?? const [];
+    final favorites = ref.watch(favoriteSongsProvider).valueOrNull ?? const [];
     final playlists = ref.watch(allPlaylistsProvider).valueOrNull ?? const [];
     final currentSong = ref.watch(nowPlayingProvider);
-    final isPlaying = ref.watch(playerStateStreamProvider).valueOrNull?.playing ?? false;
+    final isPlaying =
+        ref.watch(playerStateStreamProvider).valueOrNull?.playing ?? false;
     // Quick Picks pulls from recently-played first, falls back to
     // recently-added so a fresh-synced library still has content.
     final quickPicks = recents.isNotEmpty ? recents : added;
@@ -109,22 +112,23 @@ class HomeScreen extends ConsumerWidget {
     final pickupPages = <_GlassListPage>[
       if (recents.isNotEmpty)
         _GlassListPage(
-            title: 'Pick up where you left off',
-            songs: recents.take(4).toList()),
+          title: 'Pick up where you left off',
+          songs: recents.take(4).toList(),
+        ),
       // "In rotation" reuses recently-added so it doesn't duplicate the
       // first page's data — same surface, fresh slice of the library.
       if (added.isNotEmpty)
-        _GlassListPage(
-            title: 'In rotation',
-            songs: added.take(4).toList()),
+        _GlassListPage(title: 'In rotation', songs: added.take(4).toList()),
       if (added.length > 4)
         _GlassListPage(
-            title: 'New for you',
-            songs: added.skip(4).take(4).toList()),
+          title: 'New for you',
+          songs: added.skip(4).take(4).toList(),
+        ),
       if (favorites.isNotEmpty)
         _GlassListPage(
-            title: 'Your favorites',
-            songs: favorites.take(4).toList()),
+          title: 'Your favorites',
+          songs: favorites.take(4).toList(),
+        ),
     ];
 
     return ListView(
@@ -169,25 +173,47 @@ class HomeScreen extends ConsumerWidget {
                   songs: quickPicks,
                   currentSongId: currentSong?.id,
                   isPlaying: isPlaying,
-                  onTap: (queue, i) => _open(context, ref, queue, i),
+                  onTap: (queue, i) {
+                    if (currentSong != null &&
+                        currentSong.id == queue[i].id &&
+                        isPlaying) {
+                      PlayerExpansionScope.maybeRead(context)?.expand();
+                    } else {
+                      _open(context, ref, queue, i);
+                    }
+                  },
                 ),
             ],
           ),
         ),
 
         if (pickupPages.isNotEmpty)
-          _SwipeableGlassList(
-            pages: pickupPages,
-            onTap: (queue, i) => _open(context, ref, queue, i),
+          StaggeredAppear(
+            index: 0,
+            child: _SwipeableGlassList(
+              pages: pickupPages,
+              onTap: (queue, i) {
+                if (currentSong != null &&
+                    currentSong.id == queue[i].id &&
+                    isPlaying) {
+                  PlayerExpansionScope.maybeRead(context)?.expand();
+                } else {
+                  _open(context, ref, queue, i);
+                }
+              },
+            ),
           ),
 
-        _PlaylistsRail(
-          playlists: playlists,
-          onCreate: () => _createPlaylist(context, ref),
-          onSeeAll: () {
-            ref.read(libraryChipProvider.notifier).state = 'Playlists';
-            ref.read(homeTabIndexProvider.notifier).state = 3;
-          },
+        StaggeredAppear(
+          index: 1,
+          child: _PlaylistsRail(
+            playlists: playlists,
+            onCreate: () => _createPlaylist(context, ref),
+            onSeeAll: () {
+              ref.read(libraryChipProvider.notifier).state = 'Playlists';
+              ref.read(homeTabIndexProvider.notifier).state = 3;
+            },
+          ),
         ),
 
         if (recents.isEmpty && added.isEmpty)
@@ -315,8 +341,12 @@ class _QuickPicksState extends State<_QuickPicks> {
 
     final pages = <List<SongRow>>[];
     for (var i = 0; i < widget.songs.length; i += _QuickPicks._perPage) {
-      pages.add(widget.songs.sublist(
-          i, (i + _QuickPicks._perPage).clamp(0, widget.songs.length)));
+      pages.add(
+        widget.songs.sublist(
+          i,
+          (i + _QuickPicks._perPage).clamp(0, widget.songs.length),
+        ),
+      );
     }
 
     return Column(
@@ -324,7 +354,11 @@ class _QuickPicksState extends State<_QuickPicks> {
       children: [
         const Padding(
           padding: EdgeInsets.fromLTRB(
-              LumenTokens.pagePad, 14, LumenTokens.pagePad, 12),
+            LumenTokens.pagePad,
+            14,
+            LumenTokens.pagePad,
+            12,
+          ),
           child: Text(
             'Quick picks',
             style: TextStyle(
@@ -340,23 +374,24 @@ class _QuickPicksState extends State<_QuickPicks> {
             controller: _ctrl,
             padEnds: false,
             itemBuilder: (context, pi) {
-              final actualPageIndex =
-                  (pi - _initialPage) % pages.length;
+              final actualPageIndex = (pi - _initialPage) % pages.length;
               final pageSongs = pages[actualPageIndex];
-              final pageStart =
-                  actualPageIndex * _QuickPicks._perPage;
+              final pageStart = actualPageIndex * _QuickPicks._perPage;
               final isLight = Theme.of(context).brightness == Brightness.light;
               return Padding(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: LumenTokens.pagePad),
+                  horizontal: LumenTokens.pagePad,
+                ),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(LumenTokens.rXs),
-                    color:
-                        Colors.white.withValues(alpha: isLight ? 0.48 : 0.055),
+                    color: Colors.white.withValues(
+                      alpha: isLight ? 0.48 : 0.055,
+                    ),
                     border: Border.all(
-                      color: Colors.white
-                          .withValues(alpha: isLight ? 0.64 : 0.08),
+                      color: Colors.white.withValues(
+                        alpha: isLight ? 0.64 : 0.08,
+                      ),
                       width: 1,
                     ),
                   ),
@@ -373,14 +408,16 @@ class _QuickPicksState extends State<_QuickPicks> {
                                   const SizedBox(height: _QuickPicks._rowGap),
                                 SizedBox(
                                   height: _QuickPicks._rowHeight,
-                                  child: (c * _QuickPicks._rows + r <
+                                  child:
+                                      (c * _QuickPicks._rows + r <
                                           pageSongs.length)
                                       ? _SongRow(
-                                          song: pageSongs[
-                                              c * _QuickPicks._rows + r],
-                                          active: widget.currentSongId ==
-                                              pageSongs[c *
-                                                          _QuickPicks._rows +
+                                          song:
+                                              pageSongs[c * _QuickPicks._rows +
+                                                  r],
+                                          active:
+                                              widget.currentSongId ==
+                                              pageSongs[c * _QuickPicks._rows +
                                                       r]
                                                   .id,
                                           playing: widget.isPlaying,
@@ -479,7 +516,9 @@ class _SongRow extends ConsumerWidget {
                     children: [
                       if (active) ...[
                         Icon(
-                          playing ? Icons.graphic_eq : Icons.pause_circle_filled,
+                          playing
+                              ? Icons.graphic_eq
+                              : Icons.pause_circle_filled,
                           size: 14,
                           color: tint,
                         ),
@@ -543,8 +582,8 @@ class _PageDots extends StatelessWidget {
               color: isActive
                   ? LumenTokens.accent
                   : (Theme.of(context).brightness == Brightness.dark
-                      ? LumenTokens.fgDisabled
-                      : LumenTokens.fgLightDisabled),
+                        ? LumenTokens.fgDisabled
+                        : LumenTokens.fgLightDisabled),
               borderRadius: BorderRadius.circular(3),
             ),
           ),
@@ -580,7 +619,8 @@ class _PlaylistsRail extends StatelessWidget {
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(
-                horizontal: LumenTokens.pagePad),
+              horizontal: LumenTokens.pagePad,
+            ),
             itemCount: playlists.length + 1,
             itemBuilder: (context, i) {
               if (i == 0) {
@@ -599,8 +639,9 @@ class _PlaylistsRail extends StatelessWidget {
                             Expanded(
                               child: Container(
                                 decoration: BoxDecoration(
-                                  borderRadius:
-                                      BorderRadius.circular(LumenTokens.rXs),
+                                  borderRadius: BorderRadius.circular(
+                                    LumenTokens.rXs,
+                                  ),
                                   border: Border.all(
                                     color: Colors.white.withValues(alpha: 0.16),
                                   ),
@@ -642,12 +683,9 @@ class _PlaylistsRail extends StatelessWidget {
                   width: 150,
                   child: InkWell(
                     borderRadius: BorderRadius.circular(LumenTokens.rLg),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            PlaylistDetailScreen(playlistId: p.id),
-                      ),
-                    ),
+                    onTap: () => Navigator.of(
+                      context,
+                    ).pushLumen((_) => PlaylistDetailScreen(playlistId: p.id)),
                     child: Glass(
                       borderRadius: LumenTokens.rLg,
                       padding: const EdgeInsets.all(10),
@@ -725,7 +763,11 @@ class _SwipeableGlassListState extends State<_SwipeableGlassList> {
   // height is computed against the longest page so the PageView's
   // SizedBox doesn't snap heights between pages.
   static const _rowHeight = 60.0;
-  static const _glassPadding = 12.0; // 6 × 2 outer Glass padding
+  // 6 × 2 outer Glass padding + 1 × 2 Glass border. The Glass container's
+  // Border.all(width: 1) insets its child (BoxDecoration.padding), so it
+  // eats 2 px the page-height math used to miss — the source of the old
+  // "BOTTOM OVERFLOWED BY 2.0 PIXELS" on the rotation cards.
+  static const _glassPadding = 14.0;
 
   @override
   void dispose() {
@@ -746,7 +788,11 @@ class _SwipeableGlassListState extends State<_SwipeableGlassList> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(
-              LumenTokens.pagePad, 4, LumenTokens.pagePad, 12),
+            LumenTokens.pagePad,
+            4,
+            LumenTokens.pagePad,
+            12,
+          ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -755,10 +801,7 @@ class _SwipeableGlassListState extends State<_SwipeableGlassList> {
                   duration: LumenTokens.dFast,
                   layoutBuilder: (currentChild, previousChildren) => Stack(
                     alignment: Alignment.centerLeft,
-                    children: [
-                      ...previousChildren,
-                      ?currentChild,
-                    ],
+                    children: [...previousChildren, ?currentChild],
                   ),
                   transitionBuilder: (child, anim) =>
                       FadeTransition(opacity: anim, child: child),
@@ -780,13 +823,16 @@ class _SwipeableGlassListState extends State<_SwipeableGlassList> {
           height: pageHeight,
           child: PageView.builder(
             controller: _ctrl,
-            onPageChanged: (i) =>
-                setState(() => _page = (i - _initialPage) % widget.pages.length),
+            onPageChanged: (i) => setState(
+              () => _page = (i - _initialPage) % widget.pages.length,
+            ),
             itemBuilder: (context, pi) {
-              final page = widget.pages[(pi - _initialPage) % widget.pages.length];
+              final page =
+                  widget.pages[(pi - _initialPage) % widget.pages.length];
               return Padding(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: LumenTokens.pagePad),
+                  horizontal: LumenTokens.pagePad,
+                ),
                 child: _GlassListContent(
                   songs: page.songs,
                   onTap: widget.onTap,
@@ -814,18 +860,11 @@ class _GlassListContent extends StatelessWidget {
     return Glass(
       borderRadius: LumenTokens.rLg,
       padding: const EdgeInsets.all(6),
-      // ClipRect absorbs the ~2 px of rounding-error overflow when the
-      // glass card's fixed page height divides into N rows that don't
-      // sum to exactly the available space. Better than tuning the row
-      // padding because the row count changes between pages.
-      child: ClipRect(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (var i = 0; i < songs.length; i++)
-              _glassRow(context, songs, i),
-          ],
-        ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < songs.length; i++) _glassRow(context, songs, i),
+        ],
       ),
     );
   }
@@ -833,66 +872,62 @@ class _GlassListContent extends StatelessWidget {
   Widget _glassRow(BuildContext context, List<SongRow> songs, int i) {
     final s = songs[i];
     return InkWell(
-              borderRadius: BorderRadius.circular(LumenTokens.rXs),
-              onTap: () => onTap(songs, i),
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: Row(
-                  children: [
-                    AlbumArt(
-                      artworkPath: s.localArtworkPath,
-                      seed: s.id,
-                      size: 44,
-                      radius: 10,
+      borderRadius: BorderRadius.circular(LumenTokens.rXs),
+      onTap: () => onTap(songs, i),
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Row(
+          children: [
+            AlbumArt(
+              artworkPath: s.localArtworkPath,
+              seed: s.id,
+              size: 44,
+              radius: 10,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    s.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            s.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          Text(
-                            [s.artist, s.album]
-                                .whereType<String>()
-                                .where((t) => t.isNotEmpty)
-                                .join(' · '),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: LumenTokens.fgDimOf(context),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Icon(
-                      Icons.more_horiz,
-                      size: 18,
+                  ),
+                  Text(
+                    [s.artist, s.album]
+                        .whereType<String>()
+                        .where((t) => t.isNotEmpty)
+                        .join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
                       color: LumenTokens.fgDimOf(context),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            );
+            ),
+            Icon(
+              Icons.more_horiz,
+              size: 18,
+              color: LumenTokens.fgDimOf(context),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
 /// Section header — title + optional trailing action.
 class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({
-    required this.title,
-    this.action,
-    this.onAction,
-  });
+  const _SectionHeader({required this.title, this.action, this.onAction});
 
   final String title;
   final String? action;
@@ -902,7 +937,11 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-          LumenTokens.pagePad, 4, LumenTokens.pagePad, 12),
+        LumenTokens.pagePad,
+        4,
+        LumenTokens.pagePad,
+        12,
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
@@ -921,8 +960,7 @@ class _SectionHeader extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
               onTap: onAction,
               child: Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 6, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                 child: Text(
                   action!,
                   style: const TextStyle(
@@ -989,8 +1027,12 @@ class _SwipeableArtRailState extends State<_SwipeableArtRail> {
         // Animated header — title swap is a 180ms fade so the eye lands
         // on the new heading right as the rail finishes paging.
         Padding(
-          padding: const EdgeInsets.fromLTRB(LumenTokens.pagePad, 4,
-              LumenTokens.pagePad, 12),
+          padding: const EdgeInsets.fromLTRB(
+            LumenTokens.pagePad,
+            4,
+            LumenTokens.pagePad,
+            12,
+          ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [

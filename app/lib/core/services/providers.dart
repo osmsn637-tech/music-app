@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -17,30 +16,6 @@ final settingsServiceProvider = FutureProvider<SettingsService>((ref) async {
 final serverUrlProvider = FutureProvider<String?>((ref) async {
   final settings = await ref.watch(settingsServiceProvider.future);
   return settings.serverUrl;
-});
-
-/// Reactive theme mode. Hydrates from SharedPreferences on first read.
-class ThemeModeController extends StateNotifier<ThemeMode> {
-  ThemeModeController(this._ref) : super(ThemeMode.system) {
-    _hydrate();
-  }
-  final Ref _ref;
-
-  Future<void> _hydrate() async {
-    final settings = await _ref.read(settingsServiceProvider.future);
-    state = settings.themeMode;
-  }
-
-  Future<void> set(ThemeMode mode) async {
-    state = mode;
-    final settings = await _ref.read(settingsServiceProvider.future);
-    await settings.setThemeMode(mode);
-  }
-}
-
-final themeModeProvider =
-    StateNotifierProvider<ThemeModeController, ThemeMode>((ref) {
-  return ThemeModeController(ref);
 });
 
 /// Reactive DJ-voice toggle. Now a simple bool gating the offline voice bank

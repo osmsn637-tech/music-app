@@ -1,0 +1,32 @@
+# Live Connect — real-time cross-device playback handoff, deployed on Fly.io.
+# IMPORTANT: holds room state in memory, so it must run as a SINGLE machine
+# (deploy with --ha=false, min_machines_running = 1, auto_stop = off). The
+# ROOM_CODE is set as a secret, not here.
+app = "flacko-connect"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8002
+  force_https = true          # → clients connect over wss://
+  auto_stop_machines = "off"  # always on, so WebSockets stay connected
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 200
+    soft_limit = 150
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

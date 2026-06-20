@@ -208,7 +208,14 @@ class DjVoiceBankPlayer {
       await done.future;
       return true;
     } catch (e, st) {
-      debugPrint('[dj-bank] failed to play ${clip.id}: $e\n$st');
+      // Loud + never-stripped: a decode failure here silently kills the DJ
+      // voice (this is exactly how the Opus-vs-SoLoud bug shipped unnoticed),
+      // so make it obvious in device logs and say what to check.
+      // ignore: avoid_print
+      print('[dj-bank] CLIP FAILED TO PLAY (${clip.id}). SoLoud could not '
+          'decode "$path" — the clip codec must be MP3/Wav/Vorbis/FLAC, NOT '
+          'Ogg-Opus. $e');
+      debugPrint('$st');
       return false;
     } finally {
       await sub?.cancel();
