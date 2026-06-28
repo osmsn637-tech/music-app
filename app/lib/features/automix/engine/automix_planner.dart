@@ -201,22 +201,24 @@ class AutoMixPlanner {
         if (out.outroSection?.isInstrumental ?? false) struct *= 1.15;
         if (inIsInstrumentalEntry) struct *= 1.05;
       case TransitionType.breakdown:
-        // wants a drop to land on
-        if (incoming.cuePoints.firstDropSec != null) {
-          struct *= 1.2;
-        } else {
-          struct *= 0.7;
-        }
+        // A breakdown strips the outgoing and SLAMS the next track in — that
+        // reads as an abrupt cut on a casual auto-mix. Only let it compete
+        // when the incoming genuinely has a drop to land on, and never favour
+        // it outright.
+        struct *= incoming.cuePoints.firstDropSec != null ? 1.0 : 0.55;
         if (outLabel == SectionLabel.outro) struct *= 0.85;
       case TransitionType.drumSwap:
       case TransitionType.bassSwap:
         struct *= 0.85 + 0.15 * tempo.score; // need beats locked
       case TransitionType.echoOut:
+        // Dry-cuts the outgoing into an echo tail — usable on a mismatch, but
+        // gentler styles are preferred, so a smaller boost than reverbTail.
+        if (tempo.score < 0.5 || base.keyMatch < 0.5) struct *= 1.05;
       case TransitionType.reverbTail:
-        // graceful exits; great when key/tempo *don't* match well
-        if (tempo.score < 0.5 || base.keyMatch < 0.5) struct *= 1.15;
+        // A graceful wash — great when key/tempo *don't* match well.
+        if (tempo.score < 0.5 || base.keyMatch < 0.5) struct *= 1.2;
       case TransitionType.smoothBlend:
-        struct *= 0.95; // safe default, slightly de-prioritised vs. tailored
+        struct *= 1.0; // the seamless default — competes fairly
       case TransitionType.aiSelected:
         break;
     }

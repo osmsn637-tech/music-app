@@ -17,12 +17,14 @@ class StageBackground extends StatefulWidget {
 
 class _StageBackgroundState extends State<StageBackground>
     with TickerProviderStateMixin {
-  late final AnimationController _drift1 =
-      AnimationController(vsync: this, duration: const Duration(seconds: 28))
-        ..repeat(reverse: true);
-  late final AnimationController _drift2 =
-      AnimationController(vsync: this, duration: const Duration(seconds: 34))
-        ..repeat(reverse: true);
+  late final AnimationController _drift1 = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 28),
+  )..repeat(reverse: true);
+  late final AnimationController _drift2 = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 34),
+  )..repeat(reverse: true);
 
   // When the full player is up or another route covers the home shell,
   // this background is invisible, so we can stop the drift loops.
@@ -100,27 +102,29 @@ class _StageBackgroundState extends State<StageBackground>
             AnimatedBuilder(
               animation: Listenable.merge([_drift1, _drift2]),
               builder: (context, _) {
-                return Stack(
-                  children: [
-                    Positioned.fill(
-                      child: _Blob(
-                        color: LumenTokens.blobPurple,
-                        opacity: 0.35,
-                        driftX: _drift1.value,
-                        driftY: _drift1.value,
-                        anchor: Alignment.topLeft,
+                return RepaintBoundary(
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: _Blob(
+                          color: LumenTokens.blobPurple,
+                          opacity: 0.35,
+                          driftX: _drift1.value,
+                          driftY: _drift1.value,
+                          anchor: Alignment.topLeft,
+                        ),
                       ),
-                    ),
-                    Positioned.fill(
-                      child: _Blob(
-                        color: LumenTokens.blobPink,
-                        opacity: 0.35,
-                        driftX: 1 - _drift2.value,
-                        driftY: 1 - _drift2.value,
-                        anchor: Alignment.bottomRight,
+                      Positioned.fill(
+                        child: _Blob(
+                          color: LumenTokens.blobPink,
+                          opacity: 0.35,
+                          driftX: 1 - _drift2.value,
+                          driftY: 1 - _drift2.value,
+                          anchor: Alignment.bottomRight,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 );
               },
             ),
@@ -150,8 +154,7 @@ class _Blob extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final size =
-            constraints.biggest.shortestSide * 1.2; // ~60vw equivalent
+        final size = constraints.biggest.shortestSide * 1.2; // ~60vw equivalent
         final dx = (constraints.maxWidth * 0.20) * (driftX - 0.5) * 2;
         final dy = (constraints.maxHeight * 0.15) * (driftY - 0.5) * 2;
         final scale = 1.0 + driftX * 0.2;
@@ -161,12 +164,8 @@ class _Blob extends StatelessWidget {
           clipBehavior: Clip.none,
           children: [
             Positioned(
-              left: ax < 0
-                  ? -size * 0.16 + dx
-                  : null,
-              right: ax > 0
-                  ? -size * 0.14 + dx
-                  : null,
+              left: ax < 0 ? -size * 0.16 + dx : null,
+              right: ax > 0 ? -size * 0.14 + dx : null,
               top: ay < 0 ? -size * 0.16 + dy : null,
               bottom: ay > 0 ? -size * 0.16 + dy : null,
               width: size,

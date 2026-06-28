@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:window_manager/window_manager.dart';
@@ -15,7 +17,6 @@ class WindowMode {
   // (hidden) title-bar region, so the cover isn't squeezed. The cover flexes
   // in the layout, so an imperfect estimate can't overflow.
   static const Size _mini = Size(272, 430);
-  static const Size _miniWithQueue = Size(272, 560);
   static const Size _full = Size(1040, 720);
 
   // Remembered top-left positions so each mode reopens where you left it,
@@ -27,7 +28,9 @@ class WindowMode {
   static Future<void> enterMini(WidgetRef ref) async {
     // Remember where the full window is so exitMini can put it back.
     try {
-      _fullPos = await windowManager.getPosition();
+      _fullPos = await windowManager.getPosition().timeout(
+        const Duration(milliseconds: 400),
+      );
     } catch (_) {}
     ref.read(miniModeProvider.notifier).state = true;
     await windowManager.setResizable(false);
@@ -45,13 +48,18 @@ class WindowMode {
     } else {
       await windowManager.setAlignment(Alignment.bottomRight);
     }
+    // Make it the key window so keyboard shortcuts (⌘M to restore, space, …)
+    // are delivered to it without a click first.
+    await windowManager.focus();
   }
 
   /// Restore the full windowed app.
   static Future<void> exitMini(WidgetRef ref) async {
     // Remember where the mini window is so the next enterMini reopens there.
     try {
-      _miniPos = await windowManager.getPosition();
+      _miniPos = await windowManager.getPosition().timeout(
+        const Duration(milliseconds: 400),
+      );
     } catch (_) {}
     await windowManager.setAlwaysOnTop(false);
     // Frameless Spotify-style window: hidden title bar, traffic lights kept.
@@ -70,11 +78,7 @@ class WindowMode {
     } else {
       await windowManager.center();
     }
+    await windowManager.focus();
     ref.read(miniModeProvider.notifier).state = false;
-  }
-
-  /// Grow/shrink the mini-player to reveal or hide the inline queue.
-  static Future<void> setQueueOpen(bool open) async {
-    await windowManager.setSize(open ? _miniWithQueue : _mini);
   }
 }

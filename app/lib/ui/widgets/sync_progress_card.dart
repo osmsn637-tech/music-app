@@ -123,10 +123,7 @@ class SyncProgressCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          _ProgressRing(
-            progress: resolved.ringProgress,
-            phase: resolved.phase,
-          ),
+          _ProgressRing(progress: resolved.ringProgress, phase: resolved.phase),
           const SizedBox(height: 22),
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 240),
@@ -215,21 +212,28 @@ class _ProgressRingState extends State<_ProgressRing>
       parent: _completion,
       curve: const Interval(0.42, 1.0, curve: Curves.easeOutCubic),
     );
-    _scale = TweenSequence<double>([
-      TweenSequenceItem(
-        tween: Tween(begin: 1.0, end: 1.06)
-            .chain(CurveTween(curve: Curves.easeOut)),
-        weight: 45,
-      ),
-      TweenSequenceItem(
-        tween: Tween(begin: 1.06, end: 1.0)
-            .chain(CurveTween(curve: Curves.easeIn)),
-        weight: 55,
-      ),
-    ]).animate(CurvedAnimation(
-      parent: _completion,
-      curve: const Interval(0.42, 1.0),
-    ));
+    _scale =
+        TweenSequence<double>([
+          TweenSequenceItem(
+            tween: Tween(
+              begin: 1.0,
+              end: 1.06,
+            ).chain(CurveTween(curve: Curves.easeOut)),
+            weight: 45,
+          ),
+          TweenSequenceItem(
+            tween: Tween(
+              begin: 1.06,
+              end: 1.0,
+            ).chain(CurveTween(curve: Curves.easeIn)),
+            weight: 55,
+          ),
+        ]).animate(
+          CurvedAnimation(
+            parent: _completion,
+            curve: const Interval(0.42, 1.0),
+          ),
+        );
 
     _liveCtrl = AnimationController(
       vsync: this,
@@ -251,9 +255,10 @@ class _ProgressRingState extends State<_ProgressRing>
         widget.phase == _Phase.success || widget.phase == _Phase.failed;
 
     if (widget.phase == _Phase.working && widget.progress != _liveBase) {
-      _liveAnim = Tween<double>(begin: _liveBase, end: widget.progress).animate(
-        CurvedAnimation(parent: _liveCtrl, curve: Curves.easeOut),
-      );
+      _liveAnim = Tween<double>(
+        begin: _liveBase,
+        end: widget.progress,
+      ).animate(CurvedAnimation(parent: _liveCtrl, curve: Curves.easeOut));
       _liveBase = widget.progress;
       _liveCtrl.forward(from: 0);
     }
@@ -279,8 +284,8 @@ class _ProgressRingState extends State<_ProgressRing>
     return AnimatedBuilder(
       animation: Listenable.merge([_completion, _liveCtrl]),
       builder: (context, _) {
-        final terminal = widget.phase == _Phase.success ||
-            widget.phase == _Phase.failed;
+        final terminal =
+            widget.phase == _Phase.success || widget.phase == _Phase.failed;
         final live = _liveAnim.value.clamp(0.0, 1.0);
         final ringValue = terminal
             ? lerpDouble(live, 1.0, _ringTopUp.value)!
@@ -288,29 +293,31 @@ class _ProgressRingState extends State<_ProgressRing>
         final scale = terminal ? _scale.value : 1.0;
         final percent = (widget.progress * 100).clamp(0, 100).round();
 
-        return Transform.scale(
-          scale: scale,
-          child: SizedBox(
-            width: 132,
-            height: 132,
-            child: CustomPaint(
-              painter: _RingPainter(
-                progress: ringValue,
-                markProgress: terminal ? _markDraw.value : 0,
-                phase: widget.phase,
-              ),
-              child: Center(
-                child: Opacity(
-                  opacity: terminal
-                      ? (1 - _percentFade.value).clamp(0.0, 1.0)
-                      : 1.0,
-                  child: Text(
-                    '$percent%',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 26,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: -0.6,
+        return RepaintBoundary(
+          child: Transform.scale(
+            scale: scale,
+            child: SizedBox(
+              width: 132,
+              height: 132,
+              child: CustomPaint(
+                painter: _RingPainter(
+                  progress: ringValue,
+                  markProgress: terminal ? _markDraw.value : 0,
+                  phase: widget.phase,
+                ),
+                child: Center(
+                  child: Opacity(
+                    opacity: terminal
+                        ? (1 - _percentFade.value).clamp(0.0, 1.0)
+                        : 1.0,
+                    child: Text(
+                      '$percent%',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 26,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.6,
+                      ),
                     ),
                   ),
                 ),

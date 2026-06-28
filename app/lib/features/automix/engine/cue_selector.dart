@@ -66,7 +66,10 @@ CueSelection selectCues({
       .clamp(0.0, (out.durationSec - 1).clamp(0.0, double.infinity));
 
   // ----- incoming mix-in -----
-  final targetIn = incoming.cuePoints.mixInSec;
+  // Bring the incoming in where the music actually starts — skip a silent /
+  // sparse intro so the blend never fades into dead air (which reads as the
+  // current song being cut off into nothing).
+  final targetIn = firstEnergeticSec(incoming);
   final inMixIn = inGrid.hasGrid
       ? inGrid.nextDownbeatAtOrAfter(targetIn)
       : targetIn;
@@ -79,23 +82,39 @@ CueSelection selectCues({
   );
 }
 
-/// Convert a desired transition length in *beats* to seconds on the
-/// outgoing track's grid, and clamp it so it neither overruns the track end
-/// nor undershoots a musically sensible minimum.
+/// First point on the track where real music is playing — used as the
+/// incoming mix-in so we don't blend into a silent/sparse intro. Returns the
+/// start of the first section whose (peak-normalised) energy clears
+/// [threshold], searching only the front [maxSkipFrac] of the track so we
+/// never skip deep into a song. Falls back to the analyzer's mix-in cue.
+double firstEnergeticSec(
+  TrackAnalysis a, {
+  double threshold = 0.4,
+  double maxSkipFrac = 0.4,
+}) {
+  final cap = a.durationSec * maxSkipFrac;
+  for (final s in a.sections) {
+    if (s.startSec > cap) break;
+    if (s.energy >= threshold) return s.startSec;
+  }
+  return a.cuePoints.mixInSec;
+}
+
+/// Length of an auto-advance blend, in seconds. The blend fills the audio
+/// remaining after [mixOutSec] so the outgoing track fades to silence exactly
+/// at its end (no abrupt cut), capped to [maxSec] for a sane overlap. When the
+/// outro is longer than the cap, a [beats]-length phrase (capped) is used.
 double beatsToDurationSec({
   required int beats,
   required double beatPeriod,
   required double mixOutSec,
   required double trackDurationSec,
-  double minSec = 1.5,
+  double minSec = 6.0,
+  double maxSec = 18.0,
 }) {
-  var dur = beats * beatPeriod;
   final room = trackDurationSec - mixOutSec - 0.2;
-  if (dur > room) dur = room; // always cap to remaining audio
-  if (room < minSec) {
-    dur = room > 0 ? room : 0; // no musical room left: collapse, never overrun
-  } else if (dur < minSec) {
-    dur = minSec;
-  }
-  return dur;
+  if (room <= 0) return 0;
+  if (room <= maxSec) return room; // blend to the very end of the outgoing
+  final phrase = beats * beatPeriod;
+  return phrase.clamp(minSec, maxSec);
 }

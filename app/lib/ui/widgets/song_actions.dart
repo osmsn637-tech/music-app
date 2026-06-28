@@ -18,6 +18,7 @@ import '../theme/app_theme.dart';
 import 'album_art.dart';
 import 'glass.dart';
 import 'glass_kit.dart';
+import 'tempo_sheet.dart';
 
 /// Long-press / "…" action sheet for a song. [fromPlayer] adds the global
 /// playback controls (sleep timer + speed) on top of the per-song actions.
@@ -184,15 +185,13 @@ class SongActionsSheet extends ConsumerWidget {
               color: LumenTokens.fgDim2Of(context).withValues(alpha: 0.12),
             ),
 
-            // Player-only: sleep timer + speed.
-            if (fromPlayer) ...[
-              _SleepTimerRow(),
-              _SpeedRow(),
-              Divider(
-                height: 1,
-                color: LumenTokens.fgDim2Of(context).withValues(alpha: 0.12),
-              ),
-            ],
+            // Tempo (every song) + sleep timer (player only).
+            _SpeedRow(song: song),
+            if (fromPlayer) _SleepTimerRow(),
+            Divider(
+              height: 1,
+              color: LumenTokens.fgDim2Of(context).withValues(alpha: 0.12),
+            ),
 
             _SheetAction(
               icon: Icons.queue_play_next_rounded,
@@ -372,41 +371,30 @@ class _SleepTimerRow extends ConsumerWidget {
 }
 
 class _SpeedRow extends ConsumerWidget {
+  const _SpeedRow({required this.song});
+
+  final SongRow song;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final speed = ref.watch(playbackSpeedProvider);
+    final scale = liveTempoScale(ref, song);
+    final bpm = song.bpm ?? 0;
+    final atOriginal = (scale - 1.0).abs() < 0.001;
+    final value = atOriginal
+        ? 'Original'
+        : (bpm > 0 ? '${(bpm * scale).round()} BPM' : formatTempo(scale));
     return _SheetAction(
       icon: Icons.speed_rounded,
-      label: 'Playback speed',
+      label: 'Tempo',
       trailing: Text(
-        '${speed}x',
+        value,
         style: TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w600,
-          color: speed == 1.0
-              ? LumenTokens.fgDimOf(context)
-              : LumenTokens.accent,
+          color: atOriginal ? LumenTokens.fgDimOf(context) : LumenTokens.accent,
         ),
       ),
-      onTap: () async {
-        final picked = await showGlassSheet<double>(
-          context,
-          child: _OptionList<double>(
-            title: 'Playback speed',
-            options: const [
-              ('0.5x', 0.5),
-              ('0.75x', 0.75),
-              ('Normal', 1.0),
-              ('1.25x', 1.25),
-              ('1.5x', 1.5),
-              ('2x', 2.0),
-            ],
-            selected: speed,
-          ),
-        );
-        if (picked == null) return;
-        ref.read(playbackSpeedProvider.notifier).set(picked);
-      },
+      onTap: () => showTempoSheet(context, song),
     );
   }
 }

@@ -171,6 +171,18 @@ class $SongsTable extends Songs with TableInfo<$SongsTable, SongRow> {
     requiredDuringInsert: false,
     defaultValue: const Constant(0),
   );
+  static const VerificationMeta _tempoScaleMeta = const VerificationMeta(
+    'tempoScale',
+  );
+  @override
+  late final GeneratedColumn<double> tempoScale = GeneratedColumn<double>(
+    'tempo_scale',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1.0),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -189,6 +201,7 @@ class $SongsTable extends Songs with TableInfo<$SongsTable, SongRow> {
     addedAt,
     lastPlayedAt,
     isFavorite,
+    tempoScale,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -313,6 +326,12 @@ class $SongsTable extends Songs with TableInfo<$SongsTable, SongRow> {
         isFavorite.isAcceptableOrUnknown(data['is_favorite']!, _isFavoriteMeta),
       );
     }
+    if (data.containsKey('tempo_scale')) {
+      context.handle(
+        _tempoScaleMeta,
+        tempoScale.isAcceptableOrUnknown(data['tempo_scale']!, _tempoScaleMeta),
+      );
+    }
     return context;
   }
 
@@ -386,6 +405,10 @@ class $SongsTable extends Songs with TableInfo<$SongsTable, SongRow> {
         DriftSqlType.int,
         data['${effectivePrefix}is_favorite'],
       )!,
+      tempoScale: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}tempo_scale'],
+      )!,
     );
   }
 
@@ -412,6 +435,11 @@ class SongRow extends DataClass implements Insertable<SongRow> {
   final String? addedAt;
   final String? lastPlayedAt;
   final int isFavorite;
+
+  /// Per-song playback tempo as a speed multiplier (1.0 = original). Set from
+  /// the "Tempo" control; applied whenever this song plays. Pitch moves with
+  /// it (the engine resamples), so keep changes modest for natural sound.
+  final double tempoScale;
   const SongRow({
     required this.id,
     required this.title,
@@ -429,6 +457,7 @@ class SongRow extends DataClass implements Insertable<SongRow> {
     this.addedAt,
     this.lastPlayedAt,
     required this.isFavorite,
+    required this.tempoScale,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -473,6 +502,7 @@ class SongRow extends DataClass implements Insertable<SongRow> {
       map['last_played_at'] = Variable<String>(lastPlayedAt);
     }
     map['is_favorite'] = Variable<int>(isFavorite);
+    map['tempo_scale'] = Variable<double>(tempoScale);
     return map;
   }
 
@@ -514,6 +544,7 @@ class SongRow extends DataClass implements Insertable<SongRow> {
           ? const Value.absent()
           : Value(lastPlayedAt),
       isFavorite: Value(isFavorite),
+      tempoScale: Value(tempoScale),
     );
   }
 
@@ -539,6 +570,7 @@ class SongRow extends DataClass implements Insertable<SongRow> {
       addedAt: serializer.fromJson<String?>(json['addedAt']),
       lastPlayedAt: serializer.fromJson<String?>(json['lastPlayedAt']),
       isFavorite: serializer.fromJson<int>(json['isFavorite']),
+      tempoScale: serializer.fromJson<double>(json['tempoScale']),
     );
   }
   @override
@@ -561,6 +593,7 @@ class SongRow extends DataClass implements Insertable<SongRow> {
       'addedAt': serializer.toJson<String?>(addedAt),
       'lastPlayedAt': serializer.toJson<String?>(lastPlayedAt),
       'isFavorite': serializer.toJson<int>(isFavorite),
+      'tempoScale': serializer.toJson<double>(tempoScale),
     };
   }
 
@@ -581,6 +614,7 @@ class SongRow extends DataClass implements Insertable<SongRow> {
     Value<String?> addedAt = const Value.absent(),
     Value<String?> lastPlayedAt = const Value.absent(),
     int? isFavorite,
+    double? tempoScale,
   }) => SongRow(
     id: id ?? this.id,
     title: title ?? this.title,
@@ -602,6 +636,7 @@ class SongRow extends DataClass implements Insertable<SongRow> {
     addedAt: addedAt.present ? addedAt.value : this.addedAt,
     lastPlayedAt: lastPlayedAt.present ? lastPlayedAt.value : this.lastPlayedAt,
     isFavorite: isFavorite ?? this.isFavorite,
+    tempoScale: tempoScale ?? this.tempoScale,
   );
   SongRow copyWithCompanion(SongsCompanion data) {
     return SongRow(
@@ -635,6 +670,9 @@ class SongRow extends DataClass implements Insertable<SongRow> {
       isFavorite: data.isFavorite.present
           ? data.isFavorite.value
           : this.isFavorite,
+      tempoScale: data.tempoScale.present
+          ? data.tempoScale.value
+          : this.tempoScale,
     );
   }
 
@@ -656,7 +694,8 @@ class SongRow extends DataClass implements Insertable<SongRow> {
           ..write('searchText: $searchText, ')
           ..write('addedAt: $addedAt, ')
           ..write('lastPlayedAt: $lastPlayedAt, ')
-          ..write('isFavorite: $isFavorite')
+          ..write('isFavorite: $isFavorite, ')
+          ..write('tempoScale: $tempoScale')
           ..write(')'))
         .toString();
   }
@@ -679,6 +718,7 @@ class SongRow extends DataClass implements Insertable<SongRow> {
     addedAt,
     lastPlayedAt,
     isFavorite,
+    tempoScale,
   );
   @override
   bool operator ==(Object other) =>
@@ -699,7 +739,8 @@ class SongRow extends DataClass implements Insertable<SongRow> {
           other.searchText == this.searchText &&
           other.addedAt == this.addedAt &&
           other.lastPlayedAt == this.lastPlayedAt &&
-          other.isFavorite == this.isFavorite);
+          other.isFavorite == this.isFavorite &&
+          other.tempoScale == this.tempoScale);
 }
 
 class SongsCompanion extends UpdateCompanion<SongRow> {
@@ -719,6 +760,7 @@ class SongsCompanion extends UpdateCompanion<SongRow> {
   final Value<String?> addedAt;
   final Value<String?> lastPlayedAt;
   final Value<int> isFavorite;
+  final Value<double> tempoScale;
   final Value<int> rowid;
   const SongsCompanion({
     this.id = const Value.absent(),
@@ -737,6 +779,7 @@ class SongsCompanion extends UpdateCompanion<SongRow> {
     this.addedAt = const Value.absent(),
     this.lastPlayedAt = const Value.absent(),
     this.isFavorite = const Value.absent(),
+    this.tempoScale = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   SongsCompanion.insert({
@@ -756,6 +799,7 @@ class SongsCompanion extends UpdateCompanion<SongRow> {
     this.addedAt = const Value.absent(),
     this.lastPlayedAt = const Value.absent(),
     this.isFavorite = const Value.absent(),
+    this.tempoScale = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        title = Value(title),
@@ -777,6 +821,7 @@ class SongsCompanion extends UpdateCompanion<SongRow> {
     Expression<String>? addedAt,
     Expression<String>? lastPlayedAt,
     Expression<int>? isFavorite,
+    Expression<double>? tempoScale,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -796,6 +841,7 @@ class SongsCompanion extends UpdateCompanion<SongRow> {
       if (addedAt != null) 'added_at': addedAt,
       if (lastPlayedAt != null) 'last_played_at': lastPlayedAt,
       if (isFavorite != null) 'is_favorite': isFavorite,
+      if (tempoScale != null) 'tempo_scale': tempoScale,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -817,6 +863,7 @@ class SongsCompanion extends UpdateCompanion<SongRow> {
     Value<String?>? addedAt,
     Value<String?>? lastPlayedAt,
     Value<int>? isFavorite,
+    Value<double>? tempoScale,
     Value<int>? rowid,
   }) {
     return SongsCompanion(
@@ -836,6 +883,7 @@ class SongsCompanion extends UpdateCompanion<SongRow> {
       addedAt: addedAt ?? this.addedAt,
       lastPlayedAt: lastPlayedAt ?? this.lastPlayedAt,
       isFavorite: isFavorite ?? this.isFavorite,
+      tempoScale: tempoScale ?? this.tempoScale,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -891,6 +939,9 @@ class SongsCompanion extends UpdateCompanion<SongRow> {
     if (isFavorite.present) {
       map['is_favorite'] = Variable<int>(isFavorite.value);
     }
+    if (tempoScale.present) {
+      map['tempo_scale'] = Variable<double>(tempoScale.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -916,6 +967,7 @@ class SongsCompanion extends UpdateCompanion<SongRow> {
           ..write('addedAt: $addedAt, ')
           ..write('lastPlayedAt: $lastPlayedAt, ')
           ..write('isFavorite: $isFavorite, ')
+          ..write('tempoScale: $tempoScale, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -4405,6 +4457,7 @@ typedef $$SongsTableCreateCompanionBuilder =
       Value<String?> addedAt,
       Value<String?> lastPlayedAt,
       Value<int> isFavorite,
+      Value<double> tempoScale,
       Value<int> rowid,
     });
 typedef $$SongsTableUpdateCompanionBuilder =
@@ -4425,6 +4478,7 @@ typedef $$SongsTableUpdateCompanionBuilder =
       Value<String?> addedAt,
       Value<String?> lastPlayedAt,
       Value<int> isFavorite,
+      Value<double> tempoScale,
       Value<int> rowid,
     });
 
@@ -4513,6 +4567,11 @@ class $$SongsTableFilterComposer extends Composer<_$AppDatabase, $SongsTable> {
 
   ColumnFilters<int> get isFavorite => $composableBuilder(
     column: $table.isFavorite,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get tempoScale => $composableBuilder(
+    column: $table.tempoScale,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -4605,6 +4664,11 @@ class $$SongsTableOrderingComposer
     column: $table.isFavorite,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<double> get tempoScale => $composableBuilder(
+    column: $table.tempoScale,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$SongsTableAnnotationComposer
@@ -4677,6 +4741,11 @@ class $$SongsTableAnnotationComposer
     column: $table.isFavorite,
     builder: (column) => column,
   );
+
+  GeneratedColumn<double> get tempoScale => $composableBuilder(
+    column: $table.tempoScale,
+    builder: (column) => column,
+  );
 }
 
 class $$SongsTableTableManager
@@ -4723,6 +4792,7 @@ class $$SongsTableTableManager
                 Value<String?> addedAt = const Value.absent(),
                 Value<String?> lastPlayedAt = const Value.absent(),
                 Value<int> isFavorite = const Value.absent(),
+                Value<double> tempoScale = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => SongsCompanion(
                 id: id,
@@ -4741,6 +4811,7 @@ class $$SongsTableTableManager
                 addedAt: addedAt,
                 lastPlayedAt: lastPlayedAt,
                 isFavorite: isFavorite,
+                tempoScale: tempoScale,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -4761,6 +4832,7 @@ class $$SongsTableTableManager
                 Value<String?> addedAt = const Value.absent(),
                 Value<String?> lastPlayedAt = const Value.absent(),
                 Value<int> isFavorite = const Value.absent(),
+                Value<double> tempoScale = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => SongsCompanion.insert(
                 id: id,
@@ -4779,6 +4851,7 @@ class $$SongsTableTableManager
                 addedAt: addedAt,
                 lastPlayedAt: lastPlayedAt,
                 isFavorite: isFavorite,
+                tempoScale: tempoScale,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

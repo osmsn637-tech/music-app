@@ -261,6 +261,13 @@ class PlaylistDetailScreen extends ConsumerWidget {
             itemBuilder: (context, i) {
               final song = list[i];
               final active = nowPlayingId == song.id;
+              void openMore() => SongActionsSheet.show(
+                context,
+                song,
+                onRemoveFromPlaylist: () => ref
+                    .read(playlistRepositoryProvider)
+                    .removeSong(playlistId: playlistId, songId: song.id),
+              );
               return SongTile(
                 key: ValueKey(song.id),
                 song: song,
@@ -277,19 +284,26 @@ class PlaylistDetailScreen extends ConsumerWidget {
                     _openSong(context, ref, list, i);
                   }
                 },
-                onLongPress: () => SongActionsSheet.show(
-                  context,
-                  song,
-                  onRemoveFromPlaylist: () => ref
-                      .read(playlistRepositoryProvider)
-                      .removeSong(playlistId: playlistId, songId: song.id),
-                ),
-                trailing: ReorderableDragStartListener(
-                  index: i,
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12),
-                    child: Icon(Icons.drag_handle),
-                  ),
+                onLongPress: () => openMore(),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: Icon(
+                        Icons.more_horiz,
+                        color: LumenTokens.fgDimOf(context),
+                      ),
+                      onPressed: () => openMore(),
+                      splashRadius: 20,
+                    ),
+                    ReorderableDragStartListener(
+                      index: i,
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 12),
+                        child: Icon(Icons.drag_handle),
+                      ),
+                    ),
+                  ],
                 ),
               );
             },
@@ -484,37 +498,52 @@ class _AddSongsSheet extends ConsumerWidget {
               ),
             ),
             Expanded(
-              child: all.when(
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (e, _) => Center(child: Text('Error: $e')),
-                data: (songs) => ListView.builder(
-                  controller: scroll,
-                  padding: const EdgeInsets.only(bottom: 12),
-                  itemCount: songs.length,
-                  itemBuilder: (context, i) {
-                    final song = songs[i];
-                    final already = inIds.contains(song.id);
-                    return SongTile(
-                      song: song,
-                      trailing: Icon(
-                        already ? Icons.check_rounded : Icons.add_rounded,
-                        size: 20,
-                        color: already
-                            ? LumenTokens.accent
-                            : LumenTokens.fgDimOf(context),
-                      ),
-                      onTap: already
-                          ? null
-                          : () async {
-                              await ref
-                                  .read(libraryActionsProvider)
-                                  .addToPlaylist(
-                                    playlistId: playlistId,
-                                    songId: song.id,
-                                  );
-                            },
-                    );
-                  },
+              child: ShaderMask(
+                shaderCallback: (rect) => const LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.transparent,
+                    Colors.black,
+                    Colors.black,
+                    Colors.transparent,
+                  ],
+                  stops: [0.0, 0.045, 0.96, 1.0],
+                ).createShader(rect),
+                blendMode: BlendMode.dstIn,
+                child: all.when(
+                  loading: () =>
+                      const Center(child: CircularProgressIndicator()),
+                  error: (e, _) => Center(child: Text('Error: $e')),
+                  data: (songs) => ListView.builder(
+                    controller: scroll,
+                    padding: const EdgeInsets.only(bottom: 12),
+                    itemCount: songs.length,
+                    itemBuilder: (context, i) {
+                      final song = songs[i];
+                      final already = inIds.contains(song.id);
+                      return SongTile(
+                        song: song,
+                        trailing: Icon(
+                          already ? Icons.check_rounded : Icons.add_rounded,
+                          size: 20,
+                          color: already
+                              ? LumenTokens.accent
+                              : LumenTokens.fgDimOf(context),
+                        ),
+                        onTap: already
+                            ? null
+                            : () async {
+                                await ref
+                                    .read(libraryActionsProvider)
+                                    .addToPlaylist(
+                                      playlistId: playlistId,
+                                      songId: song.id,
+                                    );
+                              },
+                      );
+                    },
+                  ),
                 ),
               ),
             ),

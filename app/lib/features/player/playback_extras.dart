@@ -3,23 +3,6 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'now_playing_controller.dart';
-import 'providers.dart';
-
-/// Current playback speed (1.0 = normal). Setting it applies to the live
-/// track and all subsequent ones via [PlayerService.setSpeed].
-class SpeedController extends StateNotifier<double> {
-  SpeedController(this._ref) : super(1.0);
-  final Ref _ref;
-
-  void set(double speed) {
-    state = speed;
-    _ref.read(playerServiceProvider).setSpeed(speed);
-  }
-}
-
-final playbackSpeedProvider = StateNotifierProvider<SpeedController, double>(
-  (ref) => SpeedController(ref),
-);
 
 /// Sleep timer. State is the remaining [Duration], or null when inactive.
 /// Pauses playback when it reaches zero.

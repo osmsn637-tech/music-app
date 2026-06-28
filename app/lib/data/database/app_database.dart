@@ -24,7 +24,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -82,6 +82,9 @@ class AppDatabase extends _$AppDatabase {
               'CREATE INDEX IF NOT EXISTS idx_dj_speech_cache_song_id '
               'ON dj_speech_cache(song_id)',
             );
+          }
+          if (from < 5) {
+            await m.addColumn(songs, songs.tempoScale);
           }
         },
       );

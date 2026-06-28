@@ -38,11 +38,12 @@ class ArtistRollup {
   final int songCount;
 }
 
-/// Distinct artists from the library, ordered by song count desc.
+/// EVERY distinct artist in the library, ordered by song count desc.
 /// Splits multi-artist fields ("Drake, 21 Savage", "X feat. Y", "X & Y")
-/// so each performer counts toward their own rollup. Otherwise a feature
-/// track inflates "Drake, 21 Savage" instead of crediting both names.
-final topArtistsProvider =
+/// so each performer counts toward their own rollup — including artists who
+/// only ever guest. Used by the full Artists lists (Library tab + the desktop
+/// sidebar), which must show all of them, not just the top few.
+final allArtistsProvider =
     FutureProvider.autoDispose<List<ArtistRollup>>((ref) async {
   final db = ref.watch(appDatabaseProvider);
   final all = await db.select(db.songs).get();
@@ -56,5 +57,13 @@ final topArtistsProvider =
       .map((e) => ArtistRollup(name: e.key, songCount: e.value))
       .toList()
     ..sort((a, b) => b.songCount.compareTo(a.songCount));
-  return list.take(10).toList();
+  return list;
+});
+
+/// The top 10 artists by song count — for the search "Artists" rail (a
+/// horizontal strip, so it stays short on purpose).
+final topArtistsProvider =
+    FutureProvider.autoDispose<List<ArtistRollup>>((ref) async {
+  final all = await ref.watch(allArtistsProvider.future);
+  return all.take(10).toList();
 });

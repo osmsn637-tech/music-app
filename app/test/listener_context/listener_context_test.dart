@@ -85,6 +85,7 @@ void main() {
         title: 'Hold That Heat',
         localFilePath: '/x.mp3',
         isFavorite: 0,
+        tempoScale: 1.0,
       );
       final feat = TrackFeatures.fromSong(song, a);
       expect(feat.hasAnalysis, isTrue);

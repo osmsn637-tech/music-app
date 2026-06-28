@@ -23,6 +23,17 @@ class AlbumRef {
   final int songCount;
 }
 
+/// An artist's albums, split into ones they LEAD (own) vs. ones they only
+/// guest on (featured). The artist page shows these as separate "Albums" /
+/// "Featured On" sections, so a one-track feature no longer surfaces another
+/// artist's whole album as this artist's own.
+class ArtistAlbums {
+  const ArtistAlbums({required this.own, required this.features});
+
+  final List<AlbumRef> own;
+  final List<AlbumRef> features;
+}
+
 /// Normalises an artist/album string into a stable grouping key. Strips
 /// case, smart punctuation, parentheticals ("(2020)", "[EP]"), leading
 /// track numbers, and remaining punctuation so tag-drift variants of the
@@ -150,10 +161,68 @@ final songsByArtistProvider = Provider.autoDispose
       });
     });
 
-/// Albums [artist] appears on.
-final albumsByArtistProvider = Provider.autoDispose
-    .family<AsyncValue<List<AlbumRef>>, String>((ref, artist) {
-      return ref.watch(songsByArtistProvider(artist)).whenData(rollupAlbums);
+/// The album's lead artist — the most common first-credited name (before any
+/// "feat.") across its tracks. Distinguishes an artist's OWN albums from ones
+/// they only guest on. Returns a lower-cased key for matching.
+String _albumLeadArtist(List<SongRow> songs) {
+  final counts = <String, int>{};
+  for (final s in songs) {
+    final parts = splitMultiArtist(s.artist);
+    if (parts.isEmpty) continue;
+    final lead = parts.first.trim().toLowerCase();
+    if (lead.isEmpty) continue;
+    counts[lead] = (counts[lead] ?? 0) + 1;
+  }
+  if (counts.isEmpty) return '';
+  return counts.entries.reduce((a, b) => b.value > a.value ? b : a).key;
+}
+
+/// Builds an [AlbumRef] for a full album tracklist.
+AlbumRef _albumRef(List<SongRow> songs) {
+  final cover = songs.firstWhere(
+    (s) => s.localArtworkPath != null,
+    orElse: () => songs.first,
+  );
+  return AlbumRef(
+    name: displayAlbumName(cover.album!),
+    artist: cover.artist ?? '',
+    coverPath: cover.localArtworkPath,
+    coverSeed: 'al_${cover.id}',
+    songCount: songs.length,
+  );
+}
+
+/// Albums by [artist], split into ones they LEAD (own) vs. ones they only
+/// guest on (featured). Each album's lead artist is judged from its FULL
+/// tracklist, so a single guest verse no longer lands another artist's whole
+/// album in this artist's "Albums".
+final artistAlbumsProvider = Provider.autoDispose
+    .family<AsyncValue<ArtistAlbums>, String>((ref, artist) {
+      final target = artist.trim().toLowerCase();
+      return ref.watch(allSongsProvider).whenData((allSongs) {
+        // Group EVERY song by album so each album's lead is judged from its
+        // whole tracklist, not just this artist's tracks.
+        final byAlbum = <String, List<SongRow>>{};
+        for (final s in allSongs) {
+          final album = s.album;
+          if (album == null || album.isEmpty) continue;
+          final key = normalizeAlbumKey(album);
+          if (key.isEmpty) continue;
+          (byAlbum[key] ??= <SongRow>[]).add(s);
+        }
+        final own = <AlbumRef>[];
+        final features = <AlbumRef>[];
+        for (final songs in byAlbum.values) {
+          if (!songs.any((s) => _artistMatches(s.artist, artist))) continue;
+          (_albumLeadArtist(songs) == target ? own : features)
+              .add(_albumRef(songs));
+        }
+        int byName(AlbumRef a, AlbumRef b) =>
+            a.name.toLowerCase().compareTo(b.name.toLowerCase());
+        own.sort(byName);
+        features.sort(byName);
+        return ArtistAlbums(own: own, features: features);
+      });
     });
 
 /// Songs on [album] (matched on the normalised album key).

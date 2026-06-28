@@ -277,21 +277,29 @@ class _PlayerMorphState extends State<_PlayerMorph>
       _controlsReveal.value = 0;
       _revealArmed = false;
     }
+    // Fully collapsed → snap the lyrics/queue surfaces back to the cover so the
+    // NEXT expand always opens on the album art, never straight into lyrics or
+    // the queue. Below e≈0.03 both surfaces are already invisible (full chrome
+    // only renders above e>0.3), so this is an instant, unseen reset.
+    if (widget.expansion.value < 0.03) {
+      if (_lyricsController.value != 0) _lyricsController.value = 0;
+      if (_queueController.value != 0) _queueController.value = 0;
+    }
   }
 
-  /// Swipe handler for the lyric list. A downward swipe hides the transport
-  /// (full-page lyrics); an upward swipe brings it back — but only on the
-  /// *second* upward swipe, so a casual scroll-back doesn't pop the controls
-  /// in unexpectedly.
+  /// Swipe handler for the lyric list. Scrolling DOWN into the lyrics hides the
+  /// transport (full-page lyrics); scrolling back UP brings it back — but only
+  /// on the *second* upward swipe, so a casual scroll-back doesn't pop the
+  /// controls in unexpectedly.
   void _onLyricsScroll(ScrollDirection dir) {
     // Only meaningful while actually viewing lyrics on the open player.
     if (_lyricsController.value < 0.5 || widget.expansion.value < 0.9) return;
-    if (dir == ScrollDirection.forward) {
-      // Finger dragging down → hide the controls.
+    if (dir == ScrollDirection.reverse) {
+      // Scrolling down (deeper into the lyrics) → hide the controls.
       _revealArmed = false;
       if (_controlsReveal.value == 0) _controlsReveal.forward();
-    } else if (dir == ScrollDirection.reverse) {
-      // Finger dragging up → reveal, but require a second swipe.
+    } else if (dir == ScrollDirection.forward) {
+      // Scrolling back up → reveal, but require a second swipe.
       if (_controlsReveal.value > 0) {
         if (_revealArmed) {
           _controlsReveal.reverse();
@@ -391,7 +399,15 @@ class _PlayerMorphState extends State<_PlayerMorph>
     );
 
     final fullRect = Offset.zero & size;
-    final fullArtSize = math.min(size.width - 100, 260.0);
+    // Bigger cover on the open player. Capped by width (side margins) and by
+    // the vertical room above the fixed transport stack (everything below sits
+    // at fixed offsets from the bottom), so it never crowds the title row /
+    // scrubber on shorter phones.
+    final artMaxH = size.height - bottomInset - topInset - 434;
+    final fullArtSize = math.min(
+      math.min(size.width - 72, 320.0),
+      math.max(210.0, artMaxH),
+    );
     final fullArtTop = topInset + 86;
     final fullArtRect = Rect.fromLTWH(
       (size.width - fullArtSize) / 2,
@@ -742,6 +758,13 @@ class _PlayerMorphState extends State<_PlayerMorph>
 /// playhead; otherwise the reorderable generic playback queue. A playback-
 /// mode control strip (repeat · shuffle · infinity · automix) sits pinned
 /// below the list.
+/// Heights of the frosted header / controls bars that the queue list
+/// scrolls behind. The list is padded by these so the first and last
+/// rows clear the glass at rest, then slide *under* it — staying visible
+/// (blurred) through the glass instead of hard-cutting at the edge.
+const double _kQueueHeaderH = 38;
+const double _kQueueControlsH = 64;
+
 class _InlineQueue extends ConsumerWidget {
   const _InlineQueue();
 
@@ -750,34 +773,18 @@ class _InlineQueue extends ConsumerWidget {
     final djQueue = ref.watch(aiDjQueueControllerProvider);
     final entries = djQueue.queue;
     final djActive = djQueue.isActive && entries.isNotEmpty;
-    return Column(
+    // Stack (not Column): the list fills the whole surface and the two
+    // glass bars are overlaid on top, so songs scroll *behind* them and
+    // read through the frosted blur.
+    return Stack(
       children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(24, 0, 24, 8),
-          child: Row(
-            children: [
-              Icon(
-                Icons.queue_music_rounded,
-                size: 18,
-                color: Color(0xB3FFFFFF),
-              ),
-              SizedBox(width: 8),
-              Text(
-                'Up Next',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.2,
-                ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
+        Positioned.fill(
           child: djActive
               ? ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.only(
+                    top: _kQueueHeaderH,
+                    bottom: _kQueueControlsH + 8,
+                  ),
                   itemCount: entries.length,
                   itemBuilder: (_, i) {
                     final entry = entries[i];
@@ -792,7 +799,59 @@ class _InlineQueue extends ConsumerWidget {
                 )
               : const _GenericQueueList(inline: true),
         ),
-        const _QueueControlsRow(),
+        // Frosted "Up Next" header — the song list scrolls behind it.
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: ClipRect(
+            child: BackdropFilter(
+              filter: ui.ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+              child: Container(
+                height: _kQueueHeaderH,
+                alignment: Alignment.centerLeft,
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                decoration: const BoxDecoration(
+                  color: Color(0x0AFFFFFF),
+                  border: Border(
+                    bottom: BorderSide(color: Color(0x14FFFFFF)),
+                  ),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(
+                      Icons.queue_music_rounded,
+                      size: 18,
+                      color: Color(0xB3FFFFFF),
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      'Up Next',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        // Frosted controls strip — songs scroll behind it as well.
+        Positioned(
+          bottom: 0,
+          left: 0,
+          right: 0,
+          child: ClipRect(
+            child: BackdropFilter(
+              filter: ui.ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+              child: const _QueueControlsRow(),
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -820,9 +879,11 @@ class _QueueControlsRow extends ConsumerWidget {
 
     return Container(
       decoration: const BoxDecoration(
+        // Faint fill so the frosted blur behind it reads as glass.
+        color: Color(0x0AFFFFFF),
         border: Border(top: BorderSide(color: Color(0x14FFFFFF))),
       ),
-      padding: const EdgeInsets.fromLTRB(28, 10, 28, 6),
+      padding: const EdgeInsets.fromLTRB(28, 10, 28, 10),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -939,7 +1000,12 @@ class _GenericQueueList extends ConsumerWidget {
         return ReorderableListView.builder(
           shrinkWrap: !inline,
           buildDefaultDragHandles: false,
-          padding: const EdgeInsets.only(bottom: 8),
+          // Inline: clear the frosted header/controls bars at rest, then
+          // scroll behind them. Modal sheet: just a small bottom gutter.
+          padding: EdgeInsets.only(
+            top: inline ? _kQueueHeaderH : 0,
+            bottom: (inline ? _kQueueControlsH : 0) + 8,
+          ),
           itemCount: queue.length,
           onReorder: controller.reorderQueue,
           itemBuilder: (context, i) {
@@ -1919,7 +1985,7 @@ class _ActionsRow extends ConsumerWidget {
     );
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 44),
+      padding: const EdgeInsets.symmetric(horizontal: 38),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [

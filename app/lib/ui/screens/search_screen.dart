@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -15,6 +17,7 @@ import '../motion/fade_through_switcher.dart';
 import '../theme/app_theme.dart';
 import '../widgets/album_art.dart';
 import '../widgets/glass_kit.dart';
+import '../widgets/horizontal_fade_rail.dart';
 import '../../features/player/player_expansion_controller.dart';
 import '../widgets/song_actions.dart';
 import '../widgets/song_tile.dart';
@@ -73,105 +76,125 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final state = ref.watch(librarySearchControllerProvider);
     final playingId = ref.watch(nowPlayingProvider.select((s) => s?.id));
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(
-        0,
-        LumenTokens.topSafePad,
-        0,
-        LumenTokens.bottomSafePad,
-      ),
+    return Stack(
       children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(
-            LumenTokens.pagePad,
-            0,
-            LumenTokens.pagePad,
-            16,
-          ),
-          child: Text(
-            'Search',
-            style: TextStyle(
-              fontSize: 32,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -1,
-              height: 1.05,
-            ),
-          ),
-        ),
-        Padding(
+        ListView(
           padding: const EdgeInsets.fromLTRB(
-            LumenTokens.pagePad,
             0,
-            LumenTokens.pagePad,
-            22,
+            LumenTokens.topSafePad,
+            0,
+            LumenTokens.bottomSafePad,
           ),
-          child: GlassField(
-            controller: _controller,
-            hint: 'Artists, songs, albums',
-            leading: Icon(
-              Icons.search,
-              size: 18,
-              color: LumenTokens.fgDimOf(context),
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(
+                LumenTokens.pagePad,
+                0,
+                LumenTokens.pagePad,
+                16,
+              ),
+              child: Text(
+                'Search',
+                style: TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -1,
+                  height: 1.05,
+                ),
+              ),
             ),
-            trailing: state.query.isEmpty
-                ? null
-                : Pressable(
-                    onTap: () {
-                      _controller.clear();
-                      ref
-                          .read(librarySearchControllerProvider.notifier)
-                          .onQueryChanged('');
-                    },
-                    child: Icon(
-                      Icons.clear,
-                      size: 18,
-                      color: LumenTokens.fgDimOf(context),
-                    ),
-                  ),
-            onChanged: (q) => ref
-                .read(librarySearchControllerProvider.notifier)
-                .onQueryChanged(q),
-          ),
-        ),
-        // Browse ↔ loading ↔ results cross-fade instead of hard-cutting.
-        FadeThroughSwitcher(
-          child: state.query.isEmpty
-              ? Column(
-                  key: const ValueKey('browse'),
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const _ArtistsRail(),
-                    const SizedBox(height: 22),
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(
-                        LumenTokens.pagePad,
-                        0,
-                        LumenTokens.pagePad,
-                        12,
-                      ),
-                      child: Text(
-                        'Browse all',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.5,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                LumenTokens.pagePad,
+                0,
+                LumenTokens.pagePad,
+                22,
+              ),
+              child: GlassField(
+                controller: _controller,
+                hint: 'Artists, songs, albums',
+                leading: Icon(
+                  Icons.search,
+                  size: 18,
+                  color: LumenTokens.fgDimOf(context),
+                ),
+                trailing: state.query.isEmpty
+                    ? null
+                    : Pressable(
+                        onTap: () {
+                          _controller.clear();
+                          ref
+                              .read(librarySearchControllerProvider.notifier)
+                              .onQueryChanged('');
+                        },
+                        child: Icon(
+                          Icons.clear,
+                          size: 18,
+                          color: LumenTokens.fgDimOf(context),
                         ),
                       ),
+                onChanged: (q) => ref
+                    .read(librarySearchControllerProvider.notifier)
+                    .onQueryChanged(q),
+              ),
+            ),
+            // Browse ↔ loading ↔ results cross-fade instead of hard-cutting.
+            FadeThroughSwitcher(
+              child: state.query.isEmpty
+                  ? Column(
+                      key: const ValueKey('browse'),
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const _ArtistsRail(),
+                        const SizedBox(height: 22),
+                        const Padding(
+                          padding: EdgeInsets.fromLTRB(
+                            LumenTokens.pagePad,
+                            0,
+                            LumenTokens.pagePad,
+                            12,
+                          ),
+                          child: Text(
+                            'Browse all',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -0.5,
+                            ),
+                          ),
+                        ),
+                        _BrowseGrid(onPickGenre: _setQuery),
+                      ],
+                    )
+                  : state.loading
+                  ? const Padding(
+                      key: ValueKey('loading'),
+                      padding: EdgeInsets.all(40),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  : Column(
+                      key: const ValueKey('results'),
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: _buildResults(context, state, playingId),
                     ),
-                    _BrowseGrid(onPickGenre: _setQuery),
-                  ],
-                )
-              : state.loading
-              ? const Padding(
-                  key: ValueKey('loading'),
-                  padding: EdgeInsets.all(40),
-                  child: Center(child: CircularProgressIndicator()),
-                )
-              : Column(
-                  key: const ValueKey('results'),
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: _buildResults(context, state, playingId),
+            ),
+          ],
+        ),
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: IgnorePointer(
+            child: ClipRect(
+              child: BackdropFilter(
+                filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                child: SizedBox(
+                  height: MediaQuery.of(context).padding.top + 12,
+                  width: double.infinity,
                 ),
+              ),
+            ),
+          ),
         ),
       ],
     );
@@ -349,6 +372,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               }
             },
             onLongPress: () => SongActionsSheet.show(context, songs[i]),
+            onMore: () => SongActionsSheet.show(context, songs[i]),
           ),
       ],
     ];
@@ -386,62 +410,64 @@ class _ArtistsRail extends ConsumerWidget {
         ),
         SizedBox(
           height: 132,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(
-              horizontal: LumenTokens.pagePad,
-            ),
-            itemCount: artists.length,
-            itemBuilder: (context, i) {
-              final a = artists[i];
-              return Padding(
-                padding: const EdgeInsets.only(right: 14),
-                child: Pressable(
-                  onTap: () => openArtist(context, a.name),
-                  child: SizedBox(
-                    width: 100,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.10),
-                              width: 2,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.28),
-                                blurRadius: 22,
-                                offset: const Offset(0, 8),
+          child: HorizontalFadeRail(
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(
+                horizontal: LumenTokens.pagePad,
+              ),
+              itemCount: artists.length,
+              itemBuilder: (context, i) {
+                final a = artists[i];
+                return Padding(
+                  padding: const EdgeInsets.only(right: 14),
+                  child: Pressable(
+                    onTap: () => openArtist(context, a.name),
+                    child: SizedBox(
+                      width: 100,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.10),
+                                width: 2,
                               ),
-                            ],
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.28),
+                                  blurRadius: 22,
+                                  offset: const Offset(0, 8),
+                                ),
+                              ],
+                            ),
+                            child: AlbumArt(
+                              artworkPath: resolver?.localPath(a.name),
+                              seed: 'ar_${a.name}',
+                              size: 96,
+                              radius: LumenTokens.rPill,
+                            ),
                           ),
-                          child: AlbumArt(
-                            artworkPath: resolver?.localPath(a.name),
-                            seed: 'ar_${a.name}',
-                            size: 96,
-                            radius: LumenTokens.rPill,
+                          const SizedBox(height: 8),
+                          Text(
+                            a.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          a.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
         ),
       ],

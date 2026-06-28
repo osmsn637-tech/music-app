@@ -118,4 +118,27 @@ class SongRepository {
       ),
     );
   }
+
+  /// Persists a per-song playback tempo (speed multiplier, 1.0 = original).
+  /// Applied whenever the song plays; surfaced as the ↑/↓ BPM badge.
+  Future<void> setTempoScale(String id, double scale) {
+    return (_db.update(_db.songs)..where((s) => s.id.equals(id)))
+        .write(SongsCompanion(tempoScale: Value(scale)));
+  }
+
+  /// One-shot snapshot of every song (for batch backfills).
+  Future<List<SongRow>> getAll() => _db.select(_db.songs).get();
+
+  /// Bulk-fills the `bpm` column from analyzed values in a single transaction
+  /// (so drift's streams emit once, not per row). Used to copy AutoMix sidecar
+  /// BPMs into the songs table so the Tempo control can target BPM.
+  Future<void> backfillBpm(Map<String, int> bpmById) async {
+    if (bpmById.isEmpty) return;
+    await _db.transaction(() async {
+      for (final e in bpmById.entries) {
+        await (_db.update(_db.songs)..where((s) => s.id.equals(e.key)))
+            .write(SongsCompanion(bpm: Value(e.value)));
+      }
+    });
+  }
 }

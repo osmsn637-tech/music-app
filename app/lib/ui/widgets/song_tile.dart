@@ -4,6 +4,8 @@ import '../../data/database/app_database.dart';
 import '../screens/entity_nav.dart';
 import '../theme/app_theme.dart';
 import 'album_art.dart';
+import 'explicit_badge.dart';
+import 'tempo_sheet.dart';
 import 'waveform.dart';
 
 class SongTile extends StatelessWidget {
@@ -12,6 +14,7 @@ class SongTile extends StatelessWidget {
     required this.song,
     this.onTap,
     this.onLongPress,
+    this.onMore,
     this.onFavoriteToggle,
     this.trailing,
     this.isPlaying = false,
@@ -22,6 +25,10 @@ class SongTile extends StatelessWidget {
   final SongRow song;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
+
+  /// Opens the actions ("…") sheet. Shown as a tap target so it works on
+  /// desktop (where long-press isn't available) as well as touch.
+  final VoidCallback? onMore;
   final VoidCallback? onFavoriteToggle;
   final Widget? trailing;
   final bool isPlaying;
@@ -84,15 +91,23 @@ class SongTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    song.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w500,
-                      color: color,
-                    ),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          song.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                            color: color,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      const ExplicitBadge(),
+                    ],
                   ),
                   if (hasArtist || hasAlbum)
                     (linkEntities
@@ -125,28 +140,45 @@ class SongTile extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: subStyle,
                           )),
+                  // ↑/↓ + BPM under the name when this song's tempo is changed.
+                  TempoBadge(song: song),
                 ],
               ),
             ),
             if (trailing != null)
               trailing!
-            else if (onFavoriteToggle != null)
-              IconButton(
-                icon: AnimatedSwitcher(
-                  duration: LumenTokens.mBase,
-                  switchInCurve: LumenTokens.lumenOvershoot,
-                  transitionBuilder: (child, anim) =>
-                      ScaleTransition(scale: anim, child: child),
-                  child: Icon(
-                    isFav ? Icons.favorite : Icons.more_horiz,
-                    key: ValueKey(isFav),
-                    color: isFav
-                        ? LumenTokens.accent
-                        : LumenTokens.fgDimOf(context),
-                  ),
-                ),
-                onPressed: onFavoriteToggle,
-                splashRadius: 20,
+            else if (onFavoriteToggle != null || onMore != null)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (onFavoriteToggle != null)
+                    IconButton(
+                      icon: AnimatedSwitcher(
+                        duration: LumenTokens.mBase,
+                        switchInCurve: LumenTokens.lumenOvershoot,
+                        transitionBuilder: (child, anim) =>
+                            ScaleTransition(scale: anim, child: child),
+                        child: Icon(
+                          isFav ? Icons.favorite : Icons.favorite_border,
+                          key: ValueKey(isFav),
+                          color: isFav
+                              ? LumenTokens.accent
+                              : LumenTokens.fgDimOf(context),
+                        ),
+                      ),
+                      onPressed: onFavoriteToggle,
+                      splashRadius: 20,
+                    ),
+                  if (onMore != null)
+                    IconButton(
+                      icon: Icon(
+                        Icons.more_horiz,
+                        color: LumenTokens.fgDimOf(context),
+                      ),
+                      onPressed: onMore,
+                      splashRadius: 20,
+                    ),
+                ],
               ),
           ],
         ),

@@ -470,6 +470,31 @@ class NowPlayingController extends StateNotifier<SongRow?> {
     if (d == null || d == Duration.zero) return;
     if (d <= _autoMixWindow * 2) return;
     _autoMixAt = d - _autoMixWindow;
+    // When AutoMix is on, move the trigger earlier — to the outgoing's natural
+    // outro — so the blend starts as soon as the music allows ("whenever
+    // possible") rather than a fixed window before the end.
+    unawaited(_refineAutoMixStart(d));
+  }
+
+  Future<void> _refineAutoMixStart(Duration d) async {
+    if (!_ref.read(autoMixEnabledProvider)) return;
+    final current = state;
+    if (current == null || !hasNext) return;
+    final next = _queue[_queueIndex + 1];
+    try {
+      final svc = await _ref.read(autoMixServiceProvider.future);
+      final mixOut = await svc.plannedMixOutSec(current: current, next: next);
+      if (mixOut == null) return;
+      // bail if the track changed under us or the mix already fired
+      if (state?.id != current.id || _autoMixFired) return;
+      final at = Duration(milliseconds: (mixOut * 1000).round());
+      // only ever move the trigger EARLIER, and never behind the playhead
+      if (at < (_autoMixAt ?? d) && at > _lastPos) {
+        _autoMixAt = at;
+      }
+    } catch (_) {
+      // analysis missing / engine not ready — keep the fixed-window trigger
+    }
   }
 
   Future<void> _playInternal(

@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../core/utils/album_colors.dart';
 import '../../data/database/app_database.dart';
 import '../../ui/widgets/album_art.dart';
 
@@ -26,6 +27,25 @@ Future<Uint8List> _renderLyricCard({
   required List<String> lines,
   required List<Color> colors,
 }) async {
+  // Decode the artwork up front. The card paints the cover as a blurred
+  // full-bleed background via Image.file; if it isn't already in the
+  // image cache it decodes async and the two end-of-frame waits below
+  // capture a blank background. Precaching forces a synchronous paint.
+  final artPath = song.localArtworkPath;
+  if (context.mounted &&
+      artPath != null &&
+      artPath.isNotEmpty &&
+      File(artPath).existsSync()) {
+    try {
+      await precacheImage(FileImage(File(artPath)), context);
+    } catch (_) {
+      // Decode failure → card falls back to the palette gradient.
+    }
+  }
+  if (!context.mounted) {
+    throw StateError('context unmounted before lyric-card render');
+  }
+
   final boundaryKey = GlobalKey();
   final overlay = Overlay.of(context, rootOverlay: true);
   final entry = OverlayEntry(
@@ -53,7 +73,8 @@ Future<Uint8List> _renderLyricCard({
     await WidgetsBinding.instance.endOfFrame;
 
     final boundary =
-        boundaryKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+        boundaryKey.currentContext?.findRenderObject()
+            as RenderRepaintBoundary?;
     if (boundary == null) {
       throw StateError('lyric-card boundary not mounted');
     }
@@ -62,10 +83,7 @@ Future<Uint8List> _renderLyricCard({
     if (bytes == null) {
       throw StateError('lyric-card encode returned null');
     }
-    return bytes.buffer.asUint8List(
-      bytes.offsetInBytes,
-      bytes.lengthInBytes,
-    );
+    return bytes.buffer.asUint8List(bytes.offsetInBytes, bytes.lengthInBytes);
   } finally {
     entry.remove();
   }
@@ -101,13 +119,15 @@ Future<void> shareLyricsAsImage({
   // (or its render box change) across the async render gap.
   final origin = shareOriginFor(context);
   final png = await _renderLyricCard(
-    context: context, song: song, lines: lines, colors: colors,
+    context: context,
+    song: song,
+    lines: lines,
+    colors: colors,
   );
   final dir = await getTemporaryDirectory();
-  final file = File(p.join(
-    dir.path,
-    'lyrics_${DateTime.now().millisecondsSinceEpoch}.png',
-  ));
+  final file = File(
+    p.join(dir.path, 'lyrics_${DateTime.now().millisecondsSinceEpoch}.png'),
+  );
   await file.writeAsBytes(png);
   await Share.shareXFiles(
     [XFile(file.path, mimeType: 'image/png')],
@@ -126,7 +146,10 @@ Future<void> saveLyricsAsImage({
 }) async {
   if (lines.isEmpty) return;
   final png = await _renderLyricCard(
-    context: context, song: song, lines: lines, colors: colors,
+    context: context,
+    song: song,
+    lines: lines,
+    colors: colors,
   );
 
   // Some Android versions need an explicit access request; ask once and
@@ -154,94 +177,140 @@ class _LyricCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Background gradient — wash from the album palette. Darkened
-    // enough to keep the card legible, but lifted compared to the
-    // previous near-black so the album hue actually shows through the
-    // translucent card. The card's "glass" effect needs colour behind
-    // it to tint through — a near-black bg made the glass invisible.
-    final base = colors.isNotEmpty ? colors.first : const Color(0xFF1A1A1C);
-    final accent = colors.length > 1 ? colors[1] : base;
-    final bgTop = Color.lerp(accent, Colors.black, 0.35)!;
-    final bgBottom = Color.lerp(base, Colors.black, 0.75)!;
+    // Background — Apple Music uses the album cover itself, heavily
+    // blurred and over-scanned, so the wash carries *every* hue in the
+    // art instead of one flat extracted colour. We do the same when
+    // artwork is present; otherwise fall back to a vivid palette
+    // gradient (still better than a single dull hue, see
+    // vibrantFromPalette).
+    final artPath = song.localArtworkPath;
+    final hasArt =
+        artPath != null && artPath.isNotEmpty && File(artPath).existsSync();
 
-    return Container(
+    final vivid = AlbumColors.vibrantFromPalette(
+      colors,
+      fallback: const Color(0xFF7A4FB0),
+    );
+    final deep = Color.lerp(vivid, Colors.black, 0.74)!;
+    final deepest = Color.lerp(vivid, Colors.black, 0.90)!;
+
+    return SizedBox(
       width: _kCanvasWidth,
       height: _kCanvasHeight,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [bgTop, bgBottom],
-        ),
-      ),
       child: Stack(
+        fit: StackFit.expand,
         children: [
-          // Soft top-left highlight — a subtle radial light source the
-          // Apple Music share card always has in the upper-left quadrant.
+          // ─── BACKGROUND WASH ─────────────────────────────────────
+          if (hasArt)
+            Positioned.fill(
+              child: ClipRect(
+                child: Transform.scale(
+                  // Over-scan ~1.5× so the heavy blur doesn't bleed
+                  // transparent edges into the frame.
+                  scale: 1.5,
+                  child: ImageFiltered(
+                    imageFilter: ui.ImageFilter.blur(sigmaX: 80, sigmaY: 80),
+                    child: Image.file(
+                      File(artPath),
+                      fit: BoxFit.cover,
+                      width: _kCanvasWidth,
+                      height: _kCanvasHeight,
+                    ),
+                  ),
+                ),
+              ),
+            )
+          else
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topRight,
+                    end: Alignment.bottomLeft,
+                    colors: [deep, deepest],
+                  ),
+                ),
+              ),
+            ),
+          // Dark scrim — Apple's wash is muted, not bright. Keeps the
+          // colours readable behind white text and lifts card contrast.
           Positioned.fill(
             child: DecoratedBox(
               decoration: BoxDecoration(
-                gradient: RadialGradient(
-                  center: const Alignment(-0.85, -0.95),
-                  radius: 1.2,
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
                   colors: [
-                    Colors.white.withValues(alpha: 0.06),
-                    Colors.transparent,
+                    Colors.black.withValues(alpha: 0.30),
+                    Colors.black.withValues(alpha: 0.48),
                   ],
-                  stops: const [0, 0.55],
                 ),
               ),
             ),
           ),
-          // The card — vertically centered, 75 % of canvas width.
+          // Corner vignette for depth.
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment.center,
+                  radius: 1.15,
+                  colors: [
+                    Colors.transparent,
+                    Colors.black.withValues(alpha: 0.38),
+                  ],
+                  stops: const [0.55, 1.0],
+                ),
+              ),
+            ),
+          ),
+          // The card — vertically centred, ~78 % of canvas width.
           Center(
             child: Padding(
-              // (1080 − 810) / 2 = 135 horizontal margin → card is 810 wide.
-              padding: const EdgeInsets.symmetric(horizontal: 135),
+              // (1080 − 840) / 2 = 120 horizontal margin → card is 840 wide.
+              padding: const EdgeInsets.symmetric(horizontal: 120),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(36),
-                // Outer card wrapper. The previous build's BackdropFilter
-                // was wasted — it can only blur whatever sits at the same
-                // render layer behind it (a smooth gradient) so visually
-                // there was nothing to blur. Replaced with two visibly
-                // layered inner sections — a lighter top compartment for
-                // the lyrics, then a hairline, then a darker bottom
-                // compartment for the song info. That layering is what
-                // the Apple Music card actually relies on for its glass
-                // feel, not a frosted blur.
+                borderRadius: BorderRadius.circular(44),
+                // One unified translucent-glass card (Apple's is a single
+                // panel, not two compartments). The card fill is light
+                // enough that the vivid bg tints through it. Inside, the
+                // lyric lines live in their own brighter glass pill.
                 child: Container(
                   decoration: BoxDecoration(
-                    // Base card fill. Translucent enough that the bg
-                    // accent colour tints clearly through.
-                    color: const Color(0xFF14141A).withValues(alpha: 0.55),
+                    // Dark translucent glass over the blurred art — opaque
+                    // enough to keep white lyrics crisp, sheer enough that
+                    // the art's colour still tints the panel. The card
+                    // *is* the glass pill now; no nested box.
+                    color: const Color(0xFF111114).withValues(alpha: 0.55),
                     // 1 px white rim — the hairline edge Apple's glass
                     // surfaces always have.
                     border: Border.all(
                       color: Colors.white.withValues(alpha: 0.12),
+                      width: 1,
                     ),
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // ─── TOP COMPARTMENT — LYRICS ────────────────────
-                      // Has its own subtle top-edge highlight gradient,
-                      // catching "light" on the upper rim of the glass.
+                      // ─── LYRICS ──────────────────────────────────────
+                      // Sit directly on the card, like Apple — no inner
+                      // box. A subtle top-edge highlight catches "light"
+                      // on the upper rim of the glass.
                       DecoratedBox(
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
                             begin: Alignment.topCenter,
                             end: Alignment.bottomCenter,
                             colors: [
-                              Colors.white.withValues(alpha: 0.10),
+                              Colors.white.withValues(alpha: 0.07),
                               Colors.transparent,
                             ],
-                            stops: const [0, 0.45],
+                            stops: const [0, 0.4],
                           ),
                         ),
                         child: Padding(
-                          padding:
-                              const EdgeInsets.fromLTRB(56, 60, 56, 56),
+                          padding: const EdgeInsets.fromLTRB(50, 54, 50, 24),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -251,120 +320,105 @@ class _LyricCard extends StatelessWidget {
                                   lines[i],
                                   style: const TextStyle(
                                     color: Colors.white,
-                                    fontSize: 58,
+                                    fontSize: 56,
                                     fontWeight: FontWeight.w800,
                                     letterSpacing: -1.0,
-                                    height: 1.15,
+                                    height: 1.2,
                                   ),
                                 ),
                                 if (i != lines.length - 1)
-                                  const SizedBox(height: 40),
+                                  const SizedBox(height: 30),
                               ],
                             ],
                           ),
                         ),
                       ),
-                      // ─── DIVIDER ─────────────────────────────────────
-                      // More visible than before (alpha 0.07 → 0.14) so
-                      // the seam between compartments actually reads.
-                      Container(
-                        height: 1,
-                        color: Colors.white.withValues(alpha: 0.14),
-                      ),
-                      // ─── BOTTOM COMPARTMENT — SONG INFO ──────────────
-                      // Additional black @ 0.28 fill stacks on top of the
-                      // card's base fill, giving this compartment a
-                      // visibly darker tone than the lyrics block above.
-                      // That's the "two halves" feel.
-                      Container(
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.28),
-                        ),
-                        child: Padding(
-                          padding:
-                              const EdgeInsets.fromLTRB(48, 36, 48, 48),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              AlbumArt(
-                                artworkPath: song.localArtworkPath,
-                                seed: song.id,
-                                size: 168,
-                                radius: 12,
-                              ),
-                              const SizedBox(width: 26),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      song.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: Colors.white
-                                            .withValues(alpha: 0.78),
-                                        fontSize: 42,
-                                        fontWeight: FontWeight.w600,
-                                        letterSpacing: -0.7,
-                                        height: 1.05,
+                      // ─── SONG INFO ROW ───────────────────────────────
+                      // Sits directly on the card (no hard divider) so the
+                      // panel reads as one unified surface like Apple's.
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(36, 6, 36, 40),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            AlbumArt(
+                              artworkPath: song.localArtworkPath,
+                              seed: song.id,
+                              size: 150,
+                              radius: 14,
+                            ),
+                            const SizedBox(width: 24),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    song.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.95,
                                       ),
+                                      fontSize: 40,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: -0.7,
+                                      height: 1.05,
                                     ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      song.artist ?? 'Unknown',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: Colors.white
-                                            .withValues(alpha: 0.58),
-                                        fontSize: 36,
-                                        fontWeight: FontWeight.w400,
-                                        letterSpacing: -0.4,
-                                        height: 1.05,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    song.artist ?? 'Unknown',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.6,
                                       ),
+                                      fontSize: 34,
+                                      fontWeight: FontWeight.w400,
+                                      letterSpacing: -0.4,
+                                      height: 1.05,
                                     ),
-                                    const SizedBox(height: 12),
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        // Flacko brand mark — black wolf-
-                                        // with-headphones logo tinted
-                                        // white at 58 % alpha to match
-                                        // the dimmer footer copy.
-                                        ColorFiltered(
-                                          colorFilter: ColorFilter.mode(
-                                            Colors.white
-                                                .withValues(alpha: 0.58),
-                                            BlendMode.srcIn,
-                                          ),
-                                          child: Image.asset(
-                                            'assets/icon/flacko_logo.png',
-                                            width: 36,
-                                            height: 36,
-                                            fit: BoxFit.contain,
-                                          ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      // Flacko brand mark — wolf-with-
+                                      // headphones logo tinted white at
+                                      // 55 % to match the dimmer footer.
+                                      ColorFiltered(
+                                        colorFilter: ColorFilter.mode(
+                                          Colors.white.withValues(alpha: 0.55),
+                                          BlendMode.srcIn,
                                         ),
-                                        const SizedBox(width: 6),
-                                        Text(
-                                          'flacko music',
-                                          style: TextStyle(
-                                            color: Colors.white
-                                                .withValues(alpha: 0.58),
-                                            fontSize: 26,
-                                            fontWeight: FontWeight.w500,
-                                            letterSpacing: -0.2,
-                                          ),
+                                        child: Image.asset(
+                                          'assets/icon/flacko_logo.png',
+                                          width: 34,
+                                          height: 34,
+                                          fit: BoxFit.contain,
                                         ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'flacko music',
+                                        style: TextStyle(
+                                          color: Colors.white.withValues(
+                                            alpha: 0.55,
+                                          ),
+                                          fontSize: 26,
+                                          fontWeight: FontWeight.w500,
+                                          letterSpacing: -0.2,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ),
                     ],

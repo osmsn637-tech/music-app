@@ -44,10 +44,12 @@ class AlbumColors {
   /// this. ~16 % of the 0-255 range — tight enough to catch
   /// compression-noise tints in greyscale covers.
   static const _minChroma = 40;
+
   /// Drop very dark pixels (shadow noise) and very light pixels
   /// (highlight noise) — both groups carry unreliable hue.
   static const _minMaxChannel = 50;
   static const _maxMinChannel = 220;
+
   /// A cover with fewer than this fraction of chromatic pixels is
   /// considered greyscale. Tight enough to reject compression noise
   /// (≪1 % at JPEG-90), loose enough to honour a small logo on an
@@ -55,10 +57,12 @@ class AlbumColors {
   /// below catches the residual "scattered noise" case where chromatic
   /// pixels exist but don't agree on a hue.
   static const _minChromaticRatio = 0.02;
+
   /// A hue bucket must hold at least this fraction of the total
   /// surviving weight to be considered. Without this, a single rogue
   /// chromatic pixel in a greyscale cover could pick the dominant hue.
   static const _minBucketRatio = 0.03;
+
   /// HSL saturation under this value is treated as "neutral" by
   /// downstream colour-clamping logic. Matches the headroom the
   /// extractor leaves on `_minChroma` (40/255 ≈ 0.16) once converted
@@ -138,6 +142,43 @@ class AlbumColors {
         .toColor();
   }
 
+  /// A saturated, mid-bright accent for the lyric share card's
+  /// background glow. The raw dominant colour (by pixel area) is often a
+  /// dark near-grey while a smaller swatch carries the real hue — which
+  /// is why dark covers used to paint a dead brown. Apple Music's share
+  /// render always shows a vivid hue, so we:
+  ///   1. pick the *most colourful* swatch in the palette, not the first;
+  ///   2. lift its saturation and pin its lightness into a glowing
+  ///      mid-range while preserving the original hue.
+  /// Greyscale palettes are kept neutral so grey covers don't gain a
+  /// phantom hue.
+  static Color vibrantFromPalette(
+    List<Color> colors, {
+    required Color fallback,
+  }) {
+    if (isFallback(colors) || colors.isEmpty) return fallback;
+    // Most-colourful swatch wins — the dominant-by-area colour can be a
+    // dark near-grey while a secondary swatch holds the actual hue.
+    var best = colors.first;
+    var bestSat = HSLColor.fromColor(best).saturation;
+    for (final c in colors) {
+      final s = HSLColor.fromColor(c).saturation;
+      if (s > bestSat) {
+        best = c;
+        bestSat = s;
+      }
+    }
+    final hsl = HSLColor.fromColor(best);
+    if (hsl.saturation < neutralSaturationThreshold) {
+      // Greyscale cover — stay neutral, just normalise lightness.
+      return HSLColor.fromAHSL(1.0, 0, 0, 0.34).toColor();
+    }
+    return hsl
+        .withSaturation(hsl.saturation.clamp(0.55, 0.92))
+        .withLightness(hsl.lightness.clamp(0.44, 0.58))
+        .toColor();
+  }
+
   static Future<List<Color>> _extractFromBytes(Uint8List bytes) async {
     final codec = await ui.instantiateImageCodec(
       bytes,
@@ -145,8 +186,9 @@ class AlbumColors {
       targetHeight: 32,
     );
     final frame = await codec.getNextFrame();
-    final byteData =
-        await frame.image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    final byteData = await frame.image.toByteData(
+      format: ui.ImageByteFormat.rawRgba,
+    );
     frame.image.dispose();
     if (byteData == null) return fallback;
 
@@ -226,12 +268,14 @@ class AlbumColors {
     final picked = <Color>[];
     for (final s in populated.take(3)) {
       final w = s[3];
-      picked.add(Color.fromARGB(
-        255,
-        (s[0] / w).round().clamp(0, 255),
-        (s[1] / w).round().clamp(0, 255),
-        (s[2] / w).round().clamp(0, 255),
-      ));
+      picked.add(
+        Color.fromARGB(
+          255,
+          (s[0] / w).round().clamp(0, 255),
+          (s[1] / w).round().clamp(0, 255),
+          (s[2] / w).round().clamp(0, 255),
+        ),
+      );
     }
     while (picked.length < 3) {
       picked.add(picked.last);
@@ -250,10 +294,6 @@ class AlbumColors {
     final base = (0.10 + luminance * 0.60).clamp(0.10, 0.72);
     Color grey(double l) =>
         HSLColor.fromAHSL(1.0, 0, 0, l.clamp(0.0, 1.0)).toColor();
-    return <Color>[
-      grey(base),
-      grey(base + 0.08),
-      grey(base - 0.05),
-    ];
+    return <Color>[grey(base), grey(base + 0.08), grey(base - 0.05)];
   }
 }

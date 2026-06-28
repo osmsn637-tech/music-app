@@ -390,6 +390,7 @@ class _SongsSliverState extends ConsumerState<_SongsSliver> {
                   }
                 },
                 onLongPress: () => SongActionsSheet.show(context, s),
+                onMore: () => SongActionsSheet.show(context, s),
                 onFavoriteToggle: () =>
                     ref.read(libraryActionsProvider).toggleFavorite(s),
               ),
@@ -434,7 +435,7 @@ class _ArtistsSliverState extends ConsumerState<_ArtistsSliver> {
 
   @override
   Widget build(BuildContext context) {
-    final async = ref.watch(topArtistsProvider);
+    final async = ref.watch(allArtistsProvider);
     final resolver = ref.watch(artistImageResolverProvider).valueOrNull;
 
     return async.when(
@@ -464,7 +465,6 @@ class _ArtistsSliverState extends ConsumerState<_ArtistsSliver> {
           itemCount: artists.length,
           itemBuilder: (context, i) {
             final a = artists[i];
-            final last = i == artists.length - 1;
             return StaggeredAppear(
               index: i,
               animate: !_entered && i < _cap,
@@ -520,16 +520,6 @@ class _ArtistsSliverState extends ConsumerState<_ArtistsSliver> {
                         ],
                       ),
                     ),
-                    // Inset hairline so the list reads as grouped rows
-                    // rather than floating items — aligned to the text
-                    // start (avatar width + gap).
-                    if (!last)
-                      const Padding(
-                        padding: EdgeInsets.only(
-                          left: 68 + LumenTokens.pagePad,
-                        ),
-                        child: Divider(height: 1),
-                      ),
                   ],
                 ),
               ),

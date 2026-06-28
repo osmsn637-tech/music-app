@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../data/database/providers.dart';
 import '../player/providers.dart';
 import 'automix_service.dart';
 import 'runtime/analysis_store.dart';
@@ -29,6 +30,25 @@ final analysisStoreProvider = FutureProvider<AnalysisStore>((ref) async {
   // seeded). Without this, iOS/release builds would index an empty dir.
   await seedAutoMixSidecars(dir);
   return AnalysisStore(dir);
+});
+
+/// One-time backfill: copies each track's analyzed BPM from its AutoMix
+/// sidecar into `songs.bpm`, so the per-song Tempo control can show and target
+/// BPM. Idempotent — only fills songs that don't already have a BPM, so it's a
+/// no-op on every launch after the first. Returns how many rows it filled.
+final bpmBackfillProvider = FutureProvider<int>((ref) async {
+  final store = await ref.watch(analysisStoreProvider.future);
+  final repo = ref.read(songRepositoryProvider);
+  final songs = await repo.getAll();
+  final fills = <String, int>{};
+  for (final s in songs) {
+    if ((s.bpm ?? 0) > 0) continue; // already has a BPM
+    final a = await store.forSong(s);
+    final bpm = a?.bpm ?? 0;
+    if (bpm > 0) fills[s.id] = bpm.round();
+  }
+  await repo.backfillBpm(fills);
+  return fills.length;
 });
 
 /// The AutoMix engine entry point. `await ref.read(autoMixServiceProvider

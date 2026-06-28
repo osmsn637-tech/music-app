@@ -302,9 +302,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     activeThumbColor: LumenTokens.accent,
                     onChanged: (v) => ref.read(djVoiceProvider.notifier).set(v),
                   ),
-                ),
-                const _RowDivider(),
-                _SettingRow(
+                ),                _SettingRow(
                   title: 'Default mode',
                   subtitle: defaultMode.label,
                   trailing: Icon(
@@ -325,31 +323,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               error: (e, _) => _SettingRow(title: 'Error: $e'),
               data: (info) => Column(
                 children: [
-                  _SettingRow(title: 'Used', trailing: _Value(info.human)),
-                  const _RowDivider(),
-                  _SettingRow(
+                  _SettingRow(title: 'Used', trailing: _Value(info.human)),                  _SettingRow(
                     title: 'Music',
                     trailing: _Value(formatBytes(info.musicBytes)),
-                  ),
-                  const _RowDivider(),
-                  _SettingRow(
+                  ),                  _SettingRow(
                     title: 'Lyrics',
                     trailing: _Value(formatBytes(info.lyricsBytes)),
-                  ),
-                  const _RowDivider(),
-                  _SettingRow(
+                  ),                  _SettingRow(
                     title: 'Artwork',
                     trailing: _Value(formatBytes(info.artworkBytes)),
-                  ),
-                  const _RowDivider(),
-                  _SettingRow(
+                  ),                  _SettingRow(
                     leading: Icons.cleaning_services_outlined,
                     title: 'Clear all downloads',
                     subtitle: 'Files + metadata + stats + playlists',
                     onTap: _clearDownloads,
-                  ),
-                  const _RowDivider(),
-                  _SettingRow(
+                  ),                  _SettingRow(
                     leading: Icons.history_toggle_off,
                     title: 'Clear listening history',
                     subtitle: 'Resets stats; favorites and playlists are kept',
@@ -459,15 +447,5 @@ class _Value extends StatelessWidget {
         fontFeatures: LumenTokens.tnum,
       ),
     );
-  }
-}
-
-/// Inset hairline between rows inside a section.
-class _RowDivider extends StatelessWidget {
-  const _RowDivider();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Divider(height: 1, indent: 14, endIndent: 14);
   }
 }

@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -27,11 +29,35 @@ class MacMiniPlayer extends ConsumerStatefulWidget {
 }
 
 class _MacMiniPlayerState extends ConsumerState<MacMiniPlayer> {
-  bool _queueOpen = false;
+  // Infinite pager — cover (i%3==0) → lyrics (i%3==1) → queue (i%3==2) → loop.
+  // Start at a high multiple of 3 so it can swipe both directions forever.
+  static const int _start = 3000;
+  late final PageController _controller;
+  int _page = _start;
 
-  void _toggleQueue() {
-    setState(() => _queueOpen = !_queueOpen);
-    WindowMode.setQueueOpen(_queueOpen);
+  @override
+  void initState() {
+    super.initState();
+    _controller = PageController(initialPage: _start);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  /// Animate forward to the next page of [type] (0 cover, 1 lyrics, 2 queue).
+  void _goToType(int type) {
+    final base = _page - (_page % 3);
+    var target = base + type;
+    if (target < _page) target += 3; // always go forward, never snap back
+    if (target == _page) return;
+    _controller.animateToPage(
+      target,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   @override
@@ -41,25 +67,20 @@ class _MacMiniPlayerState extends ConsumerState<MacMiniPlayer> {
         ref.watch(playerStateStreamProvider).valueOrNull?.playing ?? false;
     final np = ref.read(nowPlayingProvider.notifier);
 
-    // Cover ⇄ lyrics pager. Flexible (not a fixed height) so it can NEVER
-    // overflow the window — macOS reserves ~31px we don't control — and just
-    // shrinks if short. A smaller fixed square when the queue is open.
-    final pager = _MiniPager(
-      song: song,
-      onRestore: () => WindowMode.exitMini(ref),
-    );
-
     return Scaffold(
       backgroundColor: const Color(0xFF0B0B0E),
       body: Column(
         children: [
-          if (_queueOpen)
-            SizedBox(height: 200, child: pager)
-          else
-            Expanded(child: pager),
-          // The cover is a swipe surface now (swipe LEFT for lyrics), so
-          // window-dragging moves to this strip — drag the progress/controls
-          // area to move the window. Buttons inside still tap normally.
+          Expanded(
+            child: _MiniPager(
+              song: song,
+              controller: _controller,
+              page: _page,
+              onPageChanged: (p) => setState(() => _page = p),
+              onRestore: () => WindowMode.exitMini(ref),
+            ),
+          ),
+          // Drag the controls strip to move the window. Buttons still tap.
           DragToMoveArea(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -69,78 +90,72 @@ class _MacMiniPlayerState extends ConsumerState<MacMiniPlayer> {
                   song: song,
                   playing: playing,
                   controller: np,
-                  queueOpen: _queueOpen,
-                  onToggleQueue: _toggleQueue,
+                  queueActive: _page % 3 == 2,
+                  // Toggle: on the queue page, tapping the button takes
+                  // you back to the cover; otherwise it opens the queue.
+                  onQueue: () => _goToType(_page % 3 == 2 ? 0 : 2),
                 ),
               ],
             ),
           ),
-          if (_queueOpen) ...[
-            const Divider(height: 1),
-            Expanded(child: _MiniQueue(controller: np)),
-          ],
         ],
       ),
     );
   }
 }
 
-/// The cover ⇄ lyrics pager. Page 0 is the full square album cover, page 1 is
-/// the synced lyrics; swipe horizontally to flip. The restore button and a
-/// 2-dot page indicator overlay both pages.
-class _MiniPager extends StatefulWidget {
-  const _MiniPager({required this.song, required this.onRestore});
+/// Infinite cover ⇄ lyrics ⇄ queue pager. `index % 3` selects the page and it
+/// loops forever both directions. The restore button and a tappable 3-dot
+/// indicator overlay every page.
+class _MiniPager extends StatelessWidget {
+  const _MiniPager({
+    required this.song,
+    required this.controller,
+    required this.page,
+    required this.onPageChanged,
+    required this.onRestore,
+  });
 
   final SongRow? song;
+  final PageController controller;
+  final int page;
+  final ValueChanged<int> onPageChanged;
   final VoidCallback onRestore;
-
-  @override
-  State<_MiniPager> createState() => _MiniPagerState();
-}
-
-class _MiniPagerState extends State<_MiniPager> {
-  final _controller = PageController();
-  int _page = 0;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // The cover doubles as a window-drag surface (one-finger click-drag
-        // moves the window) AND a lyrics pager. To keep those from fighting,
-        // ONLY two-finger trackpad swipes page to lyrics — the PageView's
-        // drag devices are restricted to `trackpad` (pan-zoom events), while
-        // [_WindowMoveArea] claims one-finger mouse/touch drags for moving the
-        // window. The two device kinds are disjoint, so there's no arena clash.
+        // One-finger click-drag moves the window ([_WindowMoveArea]); only
+        // two-finger trackpad swipes page (dragDevices = trackpad). The two
+        // device kinds are disjoint, so there's no gesture-arena clash.
         _WindowMoveArea(
           child: ScrollConfiguration(
-            behavior: ScrollConfiguration.of(context).copyWith(
-              dragDevices: const {PointerDeviceKind.trackpad},
-            ),
-            child: PageView(
-              controller: _controller,
-              onPageChanged: (p) => setState(() => _page = p),
-              children: [
-                // Page 0 — full square cover (uncropped via AspectRatio).
-                Center(
-                  child: AspectRatio(
-                    aspectRatio: 1,
-                    child: _ArtFill(
-                      path: widget.song?.localArtworkPath,
-                      seed: widget.song?.id ?? 'idle',
-                    ),
-                  ),
-                ),
-                // Page 1 — synced lyrics for the current song.
-                const InlineLyrics(),
-              ],
+            behavior: ScrollConfiguration.of(
+              context,
+            ).copyWith(dragDevices: const {PointerDeviceKind.trackpad}),
+            child: PageView.builder(
+              controller: controller,
+              onPageChanged: onPageChanged,
+              itemBuilder: (context, index) {
+                switch (index % 3) {
+                  case 0: // cover (uncropped via AspectRatio)
+                    return Center(
+                      child: AspectRatio(
+                        aspectRatio: 1,
+                        child: _ArtFill(
+                          path: song?.localArtworkPath,
+                          seed: song?.id ?? 'idle',
+                        ),
+                      ),
+                    );
+                  case 1: // synced lyrics
+                    return const InlineLyrics();
+                  default: // up-next queue
+                    return const _MiniQueuePage();
+                }
+              },
             ),
           ),
         ),
@@ -149,7 +164,7 @@ class _MiniPagerState extends State<_MiniPager> {
           top: 8,
           right: 8,
           child: GestureDetector(
-            onTap: widget.onRestore,
+            onTap: onRestore,
             child: Container(
               width: 26,
               height: 26,
@@ -165,9 +180,8 @@ class _MiniPagerState extends State<_MiniPager> {
             ),
           ),
         ),
-        // Tap the dots to flip cover ⇄ lyrics. Gives mouse-only users (no
-        // two-finger trackpad swipe) a way to reach the lyrics page; the
-        // trackpad swipe via the PageView keeps working too.
+        // Tap the dots to advance to the next page (also gives mouse-only users
+        // a way to page without a two-finger swipe).
         Positioned(
           left: 0,
           right: 0,
@@ -175,8 +189,8 @@ class _MiniPagerState extends State<_MiniPager> {
           child: Center(
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: () => _controller.animateToPage(
-                _page == 0 ? 1 : 0,
+              onTap: () => controller.animateToPage(
+                page + 1,
                 duration: const Duration(milliseconds: 280),
                 curve: Curves.easeOutCubic,
               ),
@@ -185,7 +199,66 @@ class _MiniPagerState extends State<_MiniPager> {
                   horizontal: 16,
                   vertical: 8,
                 ),
-                child: _PageDots(count: 2, active: _page),
+                child: _PageDots(count: 3, active: page % 3),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+const double _kMiniQueueHeaderH = 32;
+
+/// The up-next queue rendered as a pager page (header + scrollable list).
+class _MiniQueuePage extends ConsumerWidget {
+  const _MiniQueuePage();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final controller = ref.watch(nowPlayingProvider.notifier);
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: _MiniQueue(
+            controller: controller,
+            topInset: _kMiniQueueHeaderH,
+          ),
+        ),
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: ClipRect(
+            child: BackdropFilter(
+              filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+              child: Container(
+                height: _kMiniQueueHeaderH,
+                alignment: Alignment.centerLeft,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                decoration: const BoxDecoration(
+                  color: Color(0x0AFFFFFF),
+                  border: Border(bottom: BorderSide(color: Color(0x14FFFFFF))),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(
+                      Icons.queue_music_rounded,
+                      size: 14,
+                      color: Colors.white70,
+                    ),
+                    SizedBox(width: 6),
+                    Text(
+                      'Up Next',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -232,7 +305,8 @@ class _WindowMoveArea extends StatelessWidget {
   }
 }
 
-/// A pill-style page indicator (the active dot elongates).
+/// Page indicator: the current page reads as a bigger round dot, the two
+/// other pages as smaller flanking pills.
 class _PageDots extends StatelessWidget {
   const _PageDots({required this.count, required this.active});
 
@@ -246,14 +320,16 @@ class _PageDots extends StatelessWidget {
       children: [
         for (var i = 0; i < count; i++)
           AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
+            duration: const Duration(milliseconds: 220),
             curve: Curves.easeOut,
             margin: const EdgeInsets.symmetric(horizontal: 3),
-            width: i == active ? 16 : 6,
-            height: 6,
+            // Active → a bigger circle (radius == half side); inactive →
+            // a smaller, shorter pill.
+            width: i == active ? 9 : 7,
+            height: i == active ? 9 : 4,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: i == active ? 0.9 : 0.4),
-              borderRadius: BorderRadius.circular(3),
+              color: Colors.white.withValues(alpha: i == active ? 0.95 : 0.4),
+              borderRadius: BorderRadius.circular(i == active ? 4.5 : 2),
             ),
           ),
       ],
@@ -268,15 +344,15 @@ class _MiniControls extends ConsumerWidget {
     required this.song,
     required this.playing,
     required this.controller,
-    required this.queueOpen,
-    required this.onToggleQueue,
+    required this.queueActive,
+    required this.onQueue,
   });
 
   final SongRow? song;
   final bool playing;
   final NowPlayingController controller;
-  final bool queueOpen;
-  final VoidCallback onToggleQueue;
+  final bool queueActive;
+  final VoidCallback onQueue;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -351,14 +427,14 @@ class _MiniControls extends ConsumerWidget {
                     onTap: () => showConnectSheet(context),
                   ),
                 ),
-                // Queue toggle on the right.
+                // Queue button — jumps straight to the queue pager page.
                 Align(
                   alignment: Alignment.centerRight,
                   child: _MiniIcon(
                     Icons.queue_music_rounded,
                     size: 20,
-                    active: queueOpen,
-                    onTap: onToggleQueue,
+                    active: queueActive,
+                    onTap: onQueue,
                   ),
                 ),
               ],
@@ -432,9 +508,10 @@ class _MiniProgressBar extends ConsumerWidget {
 }
 
 class _MiniQueue extends StatelessWidget {
-  const _MiniQueue({required this.controller});
+  const _MiniQueue({required this.controller, this.topInset = 0});
 
   final NowPlayingController controller;
+  final double topInset;
 
   @override
   Widget build(BuildContext context) {
@@ -453,7 +530,7 @@ class _MiniQueue extends StatelessWidget {
           );
         }
         return ListView.builder(
-          padding: const EdgeInsets.symmetric(vertical: 4),
+          padding: EdgeInsets.only(top: topInset + 4, bottom: 4),
           itemCount: view.queue.length,
           itemBuilder: (context, i) {
             final s = view.queue[i];

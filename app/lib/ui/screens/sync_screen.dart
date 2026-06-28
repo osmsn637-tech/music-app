@@ -106,51 +106,65 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
       body: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: _dismissEditor,
-        child: CustomScrollView(
-          slivers: [
-            SliverPadding(
-              padding: const EdgeInsets.all(16),
-              sliver: SliverList(
-                delegate: SliverChildListDelegate.fixed([
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 220),
-                    switchInCurve: Curves.easeOut,
-                    transitionBuilder: (child, anim) =>
-                        FadeTransition(opacity: anim, child: child),
-                    child: showEditor
-                        ? GlassField(
-                            key: const ValueKey('editor'),
-                            controller: _controller,
-                            focusNode: _urlFocus,
-                            autofocus: savedUrl.isNotEmpty,
-                            onSubmitted: (_) => _dismissEditor(),
-                            hint: 'http://192.101.2.87:8000',
-                            keyboardType: TextInputType.url,
-                          )
-                        : _ServerUrlPill(
-                            key: const ValueKey('pill'),
-                            url: savedUrl,
-                            onTap: _beginEditing,
-                          ),
-                  ),
-                  const SizedBox(height: 12),
-                  _SyncActionsRow(
-                    testing: _testing,
-                    onTest: _onTest,
-                    onSync: _onSync,
-                  ),
-                  if (_lastTest != null) ...[
+        child: ShaderMask(
+          shaderCallback: (rect) => const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.transparent,
+              Colors.black,
+              Colors.black,
+              Colors.transparent,
+            ],
+            stops: [0.0, 0.04, 0.94, 1.0],
+          ).createShader(rect),
+          blendMode: BlendMode.dstIn,
+          child: CustomScrollView(
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.all(16),
+                sliver: SliverList(
+                  delegate: SliverChildListDelegate.fixed([
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 220),
+                      switchInCurve: Curves.easeOut,
+                      transitionBuilder: (child, anim) =>
+                          FadeTransition(opacity: anim, child: child),
+                      child: showEditor
+                          ? GlassField(
+                              key: const ValueKey('editor'),
+                              controller: _controller,
+                              focusNode: _urlFocus,
+                              autofocus: savedUrl.isNotEmpty,
+                              onSubmitted: (_) => _dismissEditor(),
+                              hint: 'http://192.101.2.87:8000',
+                              keyboardType: TextInputType.url,
+                            )
+                          : _ServerUrlPill(
+                              key: const ValueKey('pill'),
+                              url: savedUrl,
+                              onTap: _beginEditing,
+                            ),
+                    ),
                     const SizedBox(height: 12),
-                    _TestResultBanner(result: _lastTest!, scheme: scheme),
-                  ],
-                  const SizedBox(height: 24),
-                ]),
+                    _SyncActionsRow(
+                      testing: _testing,
+                      onTest: _onTest,
+                      onSync: _onSync,
+                    ),
+                    if (_lastTest != null) ...[
+                      const SizedBox(height: 12),
+                      _TestResultBanner(result: _lastTest!, scheme: scheme),
+                    ],
+                    const SizedBox(height: 24),
+                  ]),
+                ),
               ),
-            ),
-            const _SyncProgressSliver(),
-            const _RecentLogSliver(),
-            const SliverToBoxAdapter(child: SizedBox(height: 24)),
-          ],
+              const _SyncProgressSliver(),
+              const _RecentLogSliver(),
+              const SliverToBoxAdapter(child: SizedBox(height: 24)),
+            ],
+          ),
         ),
       ),
     );
@@ -286,7 +300,7 @@ class _RecentLogSliver extends ConsumerWidget {
                     ? 'Recent activity (last $_maxRows of ${items.length})'
                     : 'Activity',
                 style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.5),
+                  color: LumenTokens.fgDim2Of(context),
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                   letterSpacing: 0.4,
@@ -403,19 +417,55 @@ class _SyncItemRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      dense: true,
-      leading: Icon(_icon, color: _color(context)),
-      title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: item.error == null
-          ? null
-          : Text(
-              item.error!,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Row(
+        children: [
+          Icon(_icon, size: 20, color: _color(context)),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  item.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: LumenTokens.fg(context),
+                  ),
+                ),
+                if (item.error != null) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    item.error!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.3,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
+              ],
             ),
-      trailing: Text(_trailing()),
+          ),
+          if (_trailing().isNotEmpty) ...[
+            const SizedBox(width: 12),
+            Text(
+              _trailing(),
+              style: TextStyle(
+                fontSize: 12.5,
+                color: LumenTokens.fgDimOf(context),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

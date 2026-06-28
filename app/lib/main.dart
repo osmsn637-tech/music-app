@@ -4,6 +4,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_displaymode/flutter_displaymode.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_soloud/flutter_soloud.dart';
 import 'package:window_manager/window_manager.dart';
@@ -33,11 +34,23 @@ PlayerService? globalPlayerService;
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Opt into the panel's highest refresh rate on Android. Many 90/120 Hz
+  // devices clamp apps to 60 Hz until one explicitly requests the high
+  // mode, which makes scrolling and the player animations feel choppy.
+  // Best-effort: a failure here must never block launch.
+  if (!kIsWeb && Platform.isAndroid) {
+    try {
+      await FlutterDisplayMode.setHighRefreshRate();
+    } catch (_) {
+      // No high-refresh mode available / plugin unavailable — stay at default.
+    }
+  }
+
   // Desktop window control (floating mini-player needs this initialised
   // before any window_manager call). Force a sane full-size window on every
   // launch so a persisted mini-player frame can't bring the app up tiny.
-  final isDesktop = !kIsWeb &&
-      (Platform.isMacOS || Platform.isWindows || Platform.isLinux);
+  final isDesktop =
+      !kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux);
   if (isDesktop) {
     await windowManager.ensureInitialized();
   }

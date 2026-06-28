@@ -14,7 +14,11 @@ import '../../features/player/providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/album_art.dart';
 import '../widgets/glass.dart';
+import '../widgets/horizontal_fade_rail.dart';
 import '../widgets/playlist_cover.dart';
+import '../widgets/song_actions.dart';
+import '../widgets/stretch_scroll.dart';
+import '../widgets/tempo_sheet.dart';
 import '../../features/player/player_expansion_controller.dart';
 import 'home_shell_providers.dart';
 import 'playlist_detail_screen.dart';
@@ -131,102 +135,105 @@ class HomeScreen extends ConsumerWidget {
         ),
     ];
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(0, 0, 0, _bottomPad),
-      children: [
-        _HomeTopSection(
-          now: now,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: _topPad),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(_hPad, 0, _hPad, 22),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      LumenTod.dateLabel(now),
-                      style: TextStyle(
-                        fontSize: 11,
-                        letterSpacing: 0.5,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white.withValues(alpha: 0.72),
+    return ScrollConfiguration(
+      behavior: const StretchScrollBehavior(),
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(0, 0, 0, _bottomPad),
+        children: [
+          _HomeTopSection(
+            now: now,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: _topPad),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(_hPad, 0, _hPad, 22),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        LumenTod.dateLabel(now),
+                        style: TextStyle(
+                          fontSize: 11,
+                          letterSpacing: 0.5,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white.withValues(alpha: 0.72),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      LumenTod.greetingFor(now),
-                      style: const TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -1,
-                        height: 1.05,
-                        color: Colors.white,
+                      const SizedBox(height: 8),
+                      Text(
+                        LumenTod.greetingFor(now),
+                        style: const TextStyle(
+                          fontSize: 32,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -1,
+                          height: 1.05,
+                          color: Colors.white,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              if (quickPicks.isNotEmpty)
-                _QuickPicks(
-                  songs: quickPicks,
-                  currentSongId: currentSong?.id,
-                  isPlaying: isPlaying,
-                  onTap: (queue, i) {
-                    if (currentSong != null &&
-                        currentSong.id == queue[i].id &&
-                        isPlaying) {
-                      PlayerExpansionScope.maybeRead(context)?.expand();
-                    } else {
-                      _open(context, ref, queue, i);
-                    }
-                  },
-                ),
-            ],
+                if (quickPicks.isNotEmpty)
+                  _QuickPicks(
+                    songs: quickPicks,
+                    currentSongId: currentSong?.id,
+                    isPlaying: isPlaying,
+                    onTap: (queue, i) {
+                      if (currentSong != null &&
+                          currentSong.id == queue[i].id &&
+                          isPlaying) {
+                        PlayerExpansionScope.maybeRead(context)?.expand();
+                      } else {
+                        _open(context, ref, queue, i);
+                      }
+                    },
+                  ),
+              ],
+            ),
           ),
-        ),
 
-        if (pickupPages.isNotEmpty)
+          if (pickupPages.isNotEmpty)
+            StaggeredAppear(
+              index: 0,
+              child: _SwipeableGlassList(
+                pages: pickupPages,
+                onTap: (queue, i) {
+                  if (currentSong != null &&
+                      currentSong.id == queue[i].id &&
+                      isPlaying) {
+                    PlayerExpansionScope.maybeRead(context)?.expand();
+                  } else {
+                    _open(context, ref, queue, i);
+                  }
+                },
+              ),
+            ),
+
           StaggeredAppear(
-            index: 0,
-            child: _SwipeableGlassList(
-              pages: pickupPages,
-              onTap: (queue, i) {
-                if (currentSong != null &&
-                    currentSong.id == queue[i].id &&
-                    isPlaying) {
-                  PlayerExpansionScope.maybeRead(context)?.expand();
-                } else {
-                  _open(context, ref, queue, i);
-                }
+            index: 1,
+            child: _PlaylistsRail(
+              playlists: playlists,
+              onCreate: () => _createPlaylist(context, ref),
+              onSeeAll: () {
+                ref.read(libraryChipProvider.notifier).state = 'Playlists';
+                ref.read(homeTabIndexProvider.notifier).state = 3;
               },
             ),
           ),
 
-        StaggeredAppear(
-          index: 1,
-          child: _PlaylistsRail(
-            playlists: playlists,
-            onCreate: () => _createPlaylist(context, ref),
-            onSeeAll: () {
-              ref.read(libraryChipProvider.notifier).state = 'Playlists';
-              ref.read(homeTabIndexProvider.notifier).state = 3;
-            },
-          ),
-        ),
-
-        if (recents.isEmpty && added.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 48),
-            child: Text(
-              'Sync your library from the profile menu (top-right) to get '
-              'started.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: LumenTokens.fgDimOf(context)),
+          if (recents.isEmpty && added.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 48),
+              child: Text(
+                'Sync your library from the profile menu (top-right) to get '
+                'started.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: LumenTokens.fgDimOf(context)),
+              ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -549,7 +556,20 @@ class _SongRow extends ConsumerWidget {
                       ),
                     ],
                   ),
+                  TempoBadge(song: song),
                 ],
+              ),
+            ),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => SongActionsSheet.show(context, song),
+              child: Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: Icon(
+                  Icons.more_horiz,
+                  size: 20,
+                  color: LumenTokens.fgDimOf(context),
+                ),
               ),
             ),
           ],
@@ -910,13 +930,21 @@ class _GlassListContent extends StatelessWidget {
                       color: LumenTokens.fgDimOf(context),
                     ),
                   ),
+                  TempoBadge(song: s),
                 ],
               ),
             ),
-            Icon(
-              Icons.more_horiz,
-              size: 18,
-              color: LumenTokens.fgDimOf(context),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => SongActionsSheet.show(context, s),
+              child: Padding(
+                padding: const EdgeInsets.only(left: 6),
+                child: Icon(
+                  Icons.more_horiz,
+                  size: 18,
+                  color: LumenTokens.fgDimOf(context),
+                ),
+              ),
             ),
           ],
         ),
@@ -1110,53 +1138,55 @@ class _ArtRail extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       height: tileSize + 52,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: LumenTokens.pagePad),
-        itemCount: songs.length,
-        itemBuilder: (context, i) {
-          final s = songs[i];
-          return Padding(
-            padding: const EdgeInsets.only(right: 14),
-            child: SizedBox(
-              width: tileSize,
-              child: GestureDetector(
-                onTap: () => onTap(s),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    AlbumArt(
-                      artworkPath: s.localArtworkPath,
-                      seed: s.id,
-                      size: tileSize,
-                      radius: LumenTokens.rSm,
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      s.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
+      child: HorizontalFadeRail(
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: LumenTokens.pagePad),
+          itemCount: songs.length,
+          itemBuilder: (context, i) {
+            final s = songs[i];
+            return Padding(
+              padding: const EdgeInsets.only(right: 14),
+              child: SizedBox(
+                width: tileSize,
+                child: GestureDetector(
+                  onTap: () => onTap(s),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      AlbumArt(
+                        artworkPath: s.localArtworkPath,
+                        seed: s.id,
+                        size: tileSize,
+                        radius: LumenTokens.rSm,
                       ),
-                    ),
-                    if (s.artist != null)
+                      const SizedBox(height: 10),
                       Text(
-                        s.artist!,
+                        s.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 13,
-                          color: LumenTokens.fgDimOf(context),
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                  ],
+                      if (s.artist != null)
+                        Text(
+                          s.artist!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: LumenTokens.fgDimOf(context),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }

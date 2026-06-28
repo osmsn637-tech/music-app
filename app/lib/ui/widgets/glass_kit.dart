@@ -122,13 +122,17 @@ class GlassButton extends StatelessWidget {
         else if (icon != null)
           Icon(icon, size: 18, color: fg),
         if (loading || icon != null) const SizedBox(width: 8),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-            color: fg,
-            letterSpacing: -0.2,
+        Flexible(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: fg,
+              letterSpacing: -0.2,
+            ),
           ),
         ),
       ],
@@ -275,29 +279,29 @@ class GlassField extends StatelessWidget {
                 controller: controller,
                 focusNode: focusNode,
                 autofocus: autofocus,
-              keyboardType: keyboardType,
-              autocorrect: false,
-              enableSuggestions: false,
-              onChanged: onChanged,
-              onSubmitted: onSubmitted,
-              cursorColor: LumenTokens.accent,
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: LumenTokens.fg(context),
-              ),
-              decoration: InputDecoration(
-                isCollapsed: true,
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(vertical: 15),
-                hintText: hint,
-                hintStyle: TextStyle(
+                keyboardType: keyboardType,
+                autocorrect: false,
+                enableSuggestions: false,
+                onChanged: onChanged,
+                onSubmitted: onSubmitted,
+                cursorColor: LumenTokens.accent,
+                style: TextStyle(
                   fontSize: 15,
-                  fontWeight: FontWeight.w500,
-                  color: LumenTokens.fgDim2Of(context),
+                  fontWeight: FontWeight.w600,
+                  color: LumenTokens.fg(context),
+                ),
+                decoration: InputDecoration(
+                  isCollapsed: true,
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 15),
+                  hintText: hint,
+                  hintStyle: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                    color: LumenTokens.fgDim2Of(context),
+                  ),
                 ),
               ),
-            ),
             ),
           ),
           if (trailing != null) ...[const SizedBox(width: 10), trailing!],
@@ -389,6 +393,7 @@ class StageScaffold extends StatelessWidget {
     required this.body,
     this.floatingActionButton,
     this.automaticallyImplyLeading = true,
+    this.bleedTop = false,
   });
 
   final String? title;
@@ -397,9 +402,47 @@ class StageScaffold extends StatelessWidget {
   final Widget? floatingActionButton;
   final bool automaticallyImplyLeading;
 
+  /// When true the [body] fills behind the status bar and the top bar
+  /// floats over it (instead of reserving its own row above the body).
+  /// Used by hero pages (album / playlist) so the cover-tinted wash
+  /// reaches the very top — no empty band under the status bar.
+  final bool bleedTop;
+
   @override
   Widget build(BuildContext context) {
     final canPop = Navigator.of(context).canPop();
+
+    final topBar = Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      child: Row(
+        children: [
+          if (automaticallyImplyLeading && canPop) ...[
+            GlassIconButton(
+              icon: Icons.arrow_back_ios_new_rounded,
+              iconSize: 17,
+              onTap: () => Navigator.of(context).maybePop(),
+            ),
+            const SizedBox(width: 12),
+          ],
+          Expanded(
+            child: title == null
+                ? const SizedBox.shrink()
+                : Text(
+                    title!,
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.5,
+                      color: LumenTokens.fg(context),
+                    ),
+                  ),
+          ),
+          if (actions != null)
+            for (final a in actions!) ...[const SizedBox(width: 8), a],
+        ],
+      ),
+    );
+
     return StageBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -410,47 +453,25 @@ class StageScaffold extends StatelessWidget {
         // Glass / BackdropFilter layers between them.
         body: Material(
           type: MaterialType.transparency,
-          child: SafeArea(
-            bottom: false,
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                  child: Row(
+          child: bleedTop
+              // Body fills behind the status bar; the top bar floats over
+              // it so a hero wash reaches the very top edge.
+              ? Stack(
+                  children: [
+                    Positioned.fill(child: body),
+                    SafeArea(bottom: false, child: topBar),
+                  ],
+                )
+              // Default: the top bar reserves its own row above the body.
+              : SafeArea(
+                  bottom: false,
+                  child: Column(
                     children: [
-                      if (automaticallyImplyLeading && canPop) ...[
-                        GlassIconButton(
-                          icon: Icons.arrow_back_ios_new_rounded,
-                          iconSize: 17,
-                          onTap: () => Navigator.of(context).maybePop(),
-                        ),
-                        const SizedBox(width: 12),
-                      ],
-                      Expanded(
-                        child: title == null
-                            ? const SizedBox.shrink()
-                            : Text(
-                                title!,
-                                style: TextStyle(
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: -0.5,
-                                  color: LumenTokens.fg(context),
-                                ),
-                              ),
-                      ),
-                      if (actions != null)
-                        for (final a in actions!) ...[
-                          const SizedBox(width: 8),
-                          a,
-                        ],
+                      topBar,
+                      Expanded(child: body),
                     ],
                   ),
                 ),
-                Expanded(child: body),
-              ],
-            ),
-          ),
         ),
       ),
     );
@@ -569,6 +590,11 @@ Future<T?> showGlassSheet<T>(BuildContext context, {required Widget child}) {
     context: context,
     backgroundColor: Colors.transparent,
     isScrollControlled: true,
+    // Push onto the ROOT navigator so the sheet floats above the home
+    // shell's floating nav bar + mini-player. Without this, sheets opened
+    // from a song row (inside the inner content navigator) render beneath
+    // that chrome and get clipped at the bottom.
+    useRootNavigator: true,
     builder: (_) => Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
       child: SafeArea(

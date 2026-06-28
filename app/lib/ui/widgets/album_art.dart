@@ -45,21 +45,23 @@ class AlbumArt extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final useFile = artworkPath != null && _exists(artworkPath!);
-    return SizedBox(
-      width: size,
-      height: size,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(radius),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (useFile)
-              Image.file(File(artworkPath!), fit: BoxFit.cover)
-            else
-              CustomPaint(painter: _GradientArt(seed: seed)),
-            // Diagonal soft-light overlay
-            const _ArtShine(),
-          ],
+    return RepaintBoundary(
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(radius),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (useFile)
+                Image.file(File(artworkPath!), fit: BoxFit.cover)
+              else
+                CustomPaint(painter: _GradientArt(seed: seed)),
+              // Diagonal soft-light overlay
+              const _ArtShine(),
+            ],
+          ),
         ),
       ),
     );
@@ -77,10 +79,7 @@ class _ArtShine extends StatelessWidget {
           gradient: RadialGradient(
             center: const Alignment(-0.5, -0.7),
             radius: 0.7,
-            colors: [
-              Colors.white.withValues(alpha: 0.4),
-              Colors.transparent,
-            ],
+            colors: [Colors.white.withValues(alpha: 0.4), Colors.transparent],
             stops: const [0.0, 0.35],
           ),
           backgroundBlendMode: BlendMode.overlay,
@@ -116,8 +115,10 @@ class _GradientArt extends CustomPainter {
     // Base radial gradient
     final paint1 = Paint()
       ..shader = RadialGradient(
-        center: Alignment(rng.nextDouble() * 1.4 - 0.7,
-            rng.nextDouble() * 1.4 - 0.7),
+        center: Alignment(
+          rng.nextDouble() * 1.4 - 0.7,
+          rng.nextDouble() * 1.4 - 0.7,
+        ),
         radius: 0.9 + rng.nextDouble() * 0.4,
         colors: [palette[2], palette[0]],
       ).createShader(rect);
@@ -126,8 +127,10 @@ class _GradientArt extends CustomPainter {
     // Secondary blob
     final paint2 = Paint()
       ..shader = RadialGradient(
-        center: Alignment(rng.nextDouble() * 1.4 - 0.7,
-            rng.nextDouble() * 1.4 - 0.7),
+        center: Alignment(
+          rng.nextDouble() * 1.4 - 0.7,
+          rng.nextDouble() * 1.4 - 0.7,
+        ),
         radius: 0.5 + rng.nextDouble() * 0.3,
         colors: [palette[1].withValues(alpha: 0.85), Colors.transparent],
       ).createShader(rect);

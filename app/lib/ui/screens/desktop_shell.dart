@@ -6,11 +6,14 @@ import 'package:window_manager/window_manager.dart';
 import '../../core/services/volume_service.dart';
 import '../../data/database/app_database.dart';
 import '../../features/automix/providers.dart';
+import '../../features/ai_dj/providers.dart';
 import '../../features/connect/providers.dart';
+import '../../features/library/artist_image_resolver.dart';
 import '../../features/library/detail_providers.dart';
 import '../../features/library/home_providers.dart';
 import '../../features/library/library_actions.dart';
 import '../../features/library/providers.dart';
+import '../../features/nav/content_navigator_scope.dart';
 import '../../features/playlists/providers.dart';
 import '../../features/player/now_playing_controller.dart';
 import '../../features/player/playback_modes.dart';
@@ -57,12 +60,19 @@ final nowPlayingPanelOpenProvider = StateProvider<bool>((_) => false);
 /// with the now-playing panel — Spotify shows the queue inline, not a popup).
 final desktopQueueOpenProvider = StateProvider<bool>((_) => false);
 
-/// Which "Your Library" filter the left rail shows: 0 = Playlists,
-/// 1 = Albums, 2 = Artists.
+/// Which "Your Library" filter the left rail shows: 0 = Songs (default),
+/// 1 = Playlists, 2 = Albums, 3 = Artists.
 final libraryFilterProvider = StateProvider<int>((_) => 0);
 
-void _go(WidgetRef ref, int index) =>
-    ref.read(homeTabIndexProvider.notifier).state = index;
+/// Assigned by [_MainPanelState] so [_go] (and any tab switch) can pop the
+/// inner content stack back to the tab root — otherwise tapping a tab you're
+/// already on, with a detail page open, would leave the stale page up.
+GlobalKey<NavigatorState>? _desktopContentNav;
+
+void _go(WidgetRef ref, int index) {
+  _desktopContentNav?.currentState?.popUntil((r) => r.isFirst);
+  ref.read(homeTabIndexProvider.notifier).state = index;
+}
 
 /// True while a text field (search / DJ prompt / dialog) holds focus, so the
 /// shell's single-key media shortcuts yield to typing. [GlassField] already
@@ -140,6 +150,11 @@ class DesktopShell extends ConsumerStatefulWidget {
 }
 
 class _DesktopShellState extends ConsumerState<DesktopShell> {
+  // Inner Navigator for the main content panel. Album / artist / playlist
+  // detail pages push HERE so the sidebar, top bar, and bottom player bar stay
+  // put instead of the page full-covering the window.
+  final GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
+
   @override
   void initState() {
     super.initState();
@@ -147,11 +162,28 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
     // shortcuts bump from the actual level even before the player bar's
     // _VolumeControl has mounted.
     VolumeService.instance.refresh();
+    _desktopContentNav = _contentNavKey;
+  }
+
+  @override
+  void dispose() {
+    if (_desktopContentNav == _contentNavKey) _desktopContentNav = null;
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final index = ref.watch(homeTabIndexProvider);
+    // Auto-open the right "Now Playing" panel when a new song starts — unless
+    // the queue panel is deliberately open (they share the slot, so don't yank
+    // that away).
+    ref.listen<SongRow?>(nowPlayingProvider, (prev, next) {
+      if (next != null &&
+          next.id != prev?.id &&
+          !ref.read(desktopQueueOpenProvider)) {
+        ref.read(nowPlayingPanelOpenProvider.notifier).state = true;
+      }
+    });
+
     final hasNowPlaying = ref.watch(nowPlayingProvider) != null;
     final lyricsOpen = ref.watch(desktopLyricsOpenProvider) && hasNowPlaying;
     final queueOpen = ref.watch(desktopQueueOpenProvider) && hasNowPlaying;
@@ -172,57 +204,55 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
           // PlayerExpansionScope so the feature screens' `...expand()` calls
           // resolve (harmless here — the player lives in the bottom bar).
           : PlayerExpansionScope(
-              // Material ancestor — without it every Text in the top bar /
-              // sidebar / player bar gets Flutter's yellow "no Material"
-              // debug underline.
-              child: Material(
-          color: _spBg,
-          child: Column(
-            children: [
-              const _TopBar(),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+              // Inner content Navigator shared with the sidebar / player bar
+              // (which sit outside the panel) so their album/artist links push
+              // INTO the panel. overlaysContent:false — the bar lays out below
+              // the panel here, so pushed pages don't reserve a bottom gap.
+              child: ContentNavigatorScope(
+                navKey: _contentNavKey,
+                overlaysContent: false,
+                // Material ancestor — without it every Text in the top bar /
+                // sidebar / player bar gets Flutter's yellow "no Material"
+                // debug underline.
+                child: Material(
+                  color: _spBg,
+                  child: Column(
                     children: [
-                      const _LibraryPanel(),
-                      const SizedBox(width: 8),
+                      const _TopBar(),
                       Expanded(
-                        child: _MainPanel(index: index, lyricsOpen: lyricsOpen),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const _LibraryPanel(),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: _MainPanel(
+                                  navKey: _contentNavKey,
+                                  lyricsOpen: lyricsOpen,
+                                ),
+                              ),
+                              if (queueOpen) ...[
+                                const SizedBox(width: 8),
+                                const _QueueRightPanel(),
+                              ] else if (panelOpen) ...[
+                                const SizedBox(width: 8),
+                                const _NowPlayingPanel(),
+                              ],
+                            ],
+                          ),
+                        ),
                       ),
-                      if (queueOpen) ...[
-                        const SizedBox(width: 8),
-                        const _QueueRightPanel(),
-                      ] else if (panelOpen) ...[
-                        const SizedBox(width: 8),
-                        const _NowPlayingPanel(),
-                      ],
+                      // Always present (Spotify-style) — shows an idle state
+                      // when nothing's playing. Keeps the mini-player popout +
+                      // device/connect controls reachable at all times.
+                      const _PlayerBar(),
                     ],
                   ),
                 ),
               ),
-              // Grows + fades in (and reverses out) so the pane above eases up.
-              AnimatedSwitcher(
-                duration: LumenTokens.mBase,
-                switchInCurve: LumenTokens.lumenDecelerate,
-                switchOutCurve: LumenTokens.lumenAccelerate,
-                transitionBuilder: (child, anim) => FadeTransition(
-                  opacity: anim,
-                  child: SizeTransition(
-                    sizeFactor: anim,
-                    axisAlignment: -1,
-                    child: child,
-                  ),
-                ),
-                child: hasNowPlaying
-                    ? const _PlayerBar(key: ValueKey('bar'))
-                    : const SizedBox.shrink(key: ValueKey('nobar')),
-              ),
-            ],
-          ),
-        ),
-      ),
+            ),
     );
   }
 }
@@ -240,14 +270,40 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
 ///   ⇧→ / ⇧←          seek ±10s             L        lyrics panel
 ///   ↑ / ↓            volume ±5%            Q        now-playing panel
 ///   ⌘M               toggle mini-player ⟷ full
-class _ShortcutHost extends ConsumerWidget {
+class _ShortcutHost extends ConsumerStatefulWidget {
   const _ShortcutHost({required this.child});
 
   final Widget child;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_ShortcutHost> createState() => _ShortcutHostState();
+}
+
+class _ShortcutHostState extends ConsumerState<_ShortcutHost> {
+  // Held explicitly so we can re-grab focus when the window flips full ⇄ mini.
+  // The swap tears down whatever held focus, which would otherwise leave the
+  // CallbackShortcuts subtree with no focused descendant → every key dropped
+  // (that's why ⌘M couldn't restore the window from the mini-player).
+  final FocusNode _node = FocusNode(debugLabel: 'shell-shortcuts');
+
+  @override
+  void dispose() {
+    _node.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final np = ref.read(nowPlayingProvider.notifier);
+
+    // On every full ⇄ mini switch, re-request focus once the new subtree is
+    // built so ⌘M and the other media keys keep firing in whichever window is
+    // now showing — without needing to click it first.
+    ref.listen<bool>(miniModeProvider, (_, _) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_node.context != null) _node.requestFocus();
+      });
+    });
 
     // Wrap a shortcut so it no-ops while a text field is focused.
     VoidCallback guard(VoidCallback cb) => () {
@@ -281,50 +337,50 @@ class _ShortcutHost extends ConsumerWidget {
     }
 
     // CallbackShortcuts must be the ANCESTOR of the focused node — key events
-    // bubble UP from the focus to it. (Autofocusing a Focus *above* it, as
-    // before, meant the events never reached the bindings.)
+    // bubble UP from the focus to it.
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
         const SingleActivator(LogicalKeyboardKey.space): guard(togglePlay),
-          const SingleActivator(LogicalKeyboardKey.arrowRight): guard(
-            () => np.next(),
-          ),
-          const SingleActivator(LogicalKeyboardKey.arrowLeft): guard(
-            () => np.previous(),
-          ),
-          const SingleActivator(LogicalKeyboardKey.arrowRight, shift: true):
-              guard(() => seekBy(10)),
-          const SingleActivator(LogicalKeyboardKey.arrowLeft, shift: true):
-              guard(() => seekBy(-10)),
-          const SingleActivator(LogicalKeyboardKey.arrowUp): guard(
-            () => bumpVolume(0.05),
-          ),
-          const SingleActivator(LogicalKeyboardKey.arrowDown): guard(
-            () => bumpVolume(-0.05),
-          ),
-          const SingleActivator(LogicalKeyboardKey.keyS): guard(
-            np.toggleShuffle,
-          ),
-          const SingleActivator(LogicalKeyboardKey.keyR): guard(np.cycleRepeat),
-          const SingleActivator(LogicalKeyboardKey.keyL): guard(
-            () => toggleProvider(desktopLyricsOpenProvider),
-          ),
-          const SingleActivator(LogicalKeyboardKey.keyQ): guard(
-            () => toggleProvider(nowPlayingPanelOpenProvider),
-          ),
-          // ⌘M toggles the mini-player ⟷ full window. (We freed ⌘M from the
-          // macOS "Minimize" menu item in MainMenu.xib so it reaches here.)
-          const SingleActivator(LogicalKeyboardKey.keyM, meta: true): () {
-            if (ref.read(miniModeProvider)) {
-              WindowMode.exitMini(ref);
-            } else {
-              WindowMode.enterMini(ref);
-            }
-          },
+        const SingleActivator(LogicalKeyboardKey.arrowRight): guard(
+          () => np.next(),
+        ),
+        const SingleActivator(LogicalKeyboardKey.arrowLeft): guard(
+          () => np.previous(),
+        ),
+        const SingleActivator(LogicalKeyboardKey.arrowRight, shift: true): guard(
+          () => seekBy(10),
+        ),
+        const SingleActivator(LogicalKeyboardKey.arrowLeft, shift: true): guard(
+          () => seekBy(-10),
+        ),
+        const SingleActivator(LogicalKeyboardKey.arrowUp): guard(
+          () => bumpVolume(0.05),
+        ),
+        const SingleActivator(LogicalKeyboardKey.arrowDown): guard(
+          () => bumpVolume(-0.05),
+        ),
+        const SingleActivator(LogicalKeyboardKey.keyS): guard(np.toggleShuffle),
+        const SingleActivator(LogicalKeyboardKey.keyR): guard(np.cycleRepeat),
+        const SingleActivator(LogicalKeyboardKey.keyL): guard(
+          () => toggleProvider(desktopLyricsOpenProvider),
+        ),
+        const SingleActivator(LogicalKeyboardKey.keyQ): guard(
+          () => toggleProvider(nowPlayingPanelOpenProvider),
+        ),
+        // ⌘M toggles the mini-player ⟷ full window. (We freed ⌘M from the
+        // macOS "Minimize" menu item in MainMenu.xib so it reaches here.)
+        const SingleActivator(LogicalKeyboardKey.keyM, meta: true): () {
+          if (ref.read(miniModeProvider)) {
+            WindowMode.exitMini(ref);
+          } else {
+            WindowMode.enterMini(ref);
+          }
+        },
       },
       child: Focus(
+        focusNode: _node,
         autofocus: true,
-        child: child,
+        child: widget.child,
       ),
     );
   }
@@ -564,7 +620,7 @@ class _LibraryPanel extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final filter = ref.watch(libraryFilterProvider);
-    const names = ['Playlists', 'Albums', 'Artists'];
+    const names = ['Songs', 'Playlists', 'Albums', 'Artists'];
     return Container(
       width: 288,
       decoration: BoxDecoration(
@@ -667,8 +723,11 @@ class _LibraryList extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Real artist photos for the avatar circles, falling back to seeded art
+    // when a photo isn't synced — same source the artist page + mobile use.
+    final resolver = ref.watch(artistImageResolverProvider).valueOrNull;
     switch (filter) {
-      case 1: // Albums
+      case 2: // Albums
         return ref
             .watch(albumsProvider)
             .when(
@@ -695,9 +754,9 @@ class _LibraryList extends ConsumerWidget {
                       },
                     ),
             );
-      case 2: // Artists
+      case 3: // Artists
         return ref
-            .watch(topArtistsProvider)
+            .watch(allArtistsProvider)
             .when(
               loading: _loading,
               error: _error,
@@ -710,6 +769,7 @@ class _LibraryList extends ConsumerWidget {
                         final ar = artists[i];
                         return _LibRow(
                           leading: AlbumArt(
+                            artworkPath: resolver?.localPath(ar.name),
                             seed: 'artist_${ar.name}',
                             size: 48,
                             radius: 24,
@@ -723,7 +783,7 @@ class _LibraryList extends ConsumerWidget {
                       },
                     ),
             );
-      default: // Playlists
+      case 1: // Playlists
         return ref
             .watch(allPlaylistsProvider)
             .when(
@@ -744,10 +804,46 @@ class _LibraryList extends ConsumerWidget {
                           ),
                           title: pl.name,
                           subtitle: 'Playlist',
-                          onTap: () => Navigator.of(context).pushLumen(
+                          onTap: () => contentNavigator(context).pushLumen(
                             (_) => PlaylistDetailScreen(playlistId: pl.id),
                             axis: LumenAxis.fade,
                           ),
+                        );
+                      },
+                    ),
+            );
+      default: // Songs
+        return ref
+            .watch(allSongsProvider)
+            .when(
+              loading: _loading,
+              error: _error,
+              data: (songs) => songs.isEmpty
+                  ? _empty('No songs yet')
+                  : ListView.builder(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      itemCount: songs.length,
+                      itemBuilder: (_, i) {
+                        final s = songs[i];
+                        return _LibRow(
+                          leading: AlbumArt(
+                            artworkPath: s.localArtworkPath,
+                            seed: s.id,
+                            size: 48,
+                            radius: 6,
+                          ),
+                          title: s.title,
+                          subtitle: 'Song · ${s.artist}',
+                          // Play the song against the full songs list as the
+                          // queue; the right Now Playing panel auto-opens.
+                          onTap: () {
+                            ref
+                                .read(aiDjQueueControllerProvider.notifier)
+                                .deactivate();
+                            ref
+                                .read(nowPlayingProvider.notifier)
+                                .playFromQueue(songs, i);
+                          },
                         );
                       },
                     ),
@@ -881,12 +977,17 @@ class _LibRow extends StatelessWidget {
 
 // ─── Main content panel ──────────────────────────────────────────────────
 
-class _MainPanel extends StatelessWidget {
-  const _MainPanel({required this.index, required this.lyricsOpen});
+class _MainPanel extends ConsumerStatefulWidget {
+  const _MainPanel({required this.navKey, required this.lyricsOpen});
 
-  final int index;
+  final GlobalKey<NavigatorState> navKey;
   final bool lyricsOpen;
 
+  @override
+  ConsumerState<_MainPanel> createState() => _MainPanelState();
+}
+
+class _MainPanelState extends ConsumerState<_MainPanel> {
   // Per-tab Spotify-style hero tint that fades into the panel.
   static Color _tint(int i) => switch (i) {
     0 => const Color(0xFF1E5C3A), // Home — muted green
@@ -897,6 +998,14 @@ class _MainPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final index = ref.watch(homeTabIndexProvider);
+    // Any tab change returns the inner stack to the tab root (defensive — tab
+    // taps also pop via _go, which covers the same-tab case a provider listen
+    // can't see).
+    ref.listen<int>(homeTabIndexProvider, (_, _) {
+      widget.navKey.currentState?.popUntil((r) => r.isFirst);
+    });
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: ColoredBox(
@@ -926,13 +1035,24 @@ class _MainPanel extends StatelessWidget {
                   ),
                 ),
               ),
-              FadeIndexedStack(index: index, children: DesktopShell._pages),
+              // Inner Navigator: the tab pages are its root route; album /
+              // artist / playlist detail pages push on top WITHIN the panel, so
+              // the sidebar, top bar, and bottom player bar keep painting.
+              Positioned.fill(
+                child: Navigator(
+                  key: widget.navKey,
+                  onGenerateRoute: (settings) => MaterialPageRoute(
+                    settings: settings,
+                    builder: (_) => const _MainTabs(),
+                  ),
+                ),
+              ),
               Positioned.fill(
                 child: AnimatedSwitcher(
                   duration: LumenTokens.mBase,
                   switchInCurve: LumenTokens.lumenDecelerate,
                   switchOutCurve: LumenTokens.lumenAccelerate,
-                  child: lyricsOpen
+                  child: widget.lyricsOpen
                       ? const _DesktopLyricsPanel(key: ValueKey('lyrics'))
                       : const SizedBox.shrink(key: ValueKey('nolyrics')),
                 ),
@@ -942,6 +1062,19 @@ class _MainPanel extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// The inner Navigator's root route — the four tab pages. A ConsumerWidget so
+/// switching tabs ([homeTabIndexProvider]) rebuilds the stack here without
+/// rebuilding the Navigator itself (which would drop any open detail page).
+class _MainTabs extends ConsumerWidget {
+  const _MainTabs();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final index = ref.watch(homeTabIndexProvider);
+    return FadeIndexedStack(index: index, children: DesktopShell._pages);
   }
 }
 
@@ -1144,12 +1277,92 @@ class _NowPlayingPanel extends ConsumerWidget {
 // ─── Bottom now-playing bar ──────────────────────────────────────────────
 
 class _PlayerBar extends ConsumerWidget {
-  const _PlayerBar({super.key});
+  const _PlayerBar();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final song = ref.watch(nowPlayingProvider);
-    if (song == null) return const SizedBox.shrink();
+    if (song == null) {
+      // Idle bar — stays present (Spotify-style) so the chrome and the
+      // minimize / connect controls are reachable before anything plays.
+      final onAnotherIdle = ref.watch(
+        connectServiceProvider.select((c) => c.activeRemote != null),
+      );
+      return Container(
+        height: 80,
+        color: _spBg,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
+          children: [
+            Expanded(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Icon(
+                      Icons.music_note_rounded,
+                      color: _spMuted,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  const Text(
+                    'Nothing playing',
+                    style: TextStyle(
+                      color: _spMuted,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.25),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.play_arrow_rounded,
+                color: Colors.black54,
+                size: 22,
+              ),
+            ),
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _BarIcon(
+                      icon: onAnotherIdle
+                          ? Icons.cast_connected
+                          : Icons.devices_rounded,
+                      size: 20,
+                      active: onAnotherIdle,
+                      onTap: () => showConnectSheet(context),
+                    ),
+                    const SizedBox(width: 14),
+                    _BarIcon(
+                      icon: Icons.picture_in_picture_alt_rounded,
+                      size: 20,
+                      onTap: () => WindowMode.enterMini(ref),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
     final snap = ref.watch(playerStateStreamProvider).valueOrNull;
     final playing = snap?.playing ?? false;
@@ -1358,6 +1571,13 @@ class _PlayerBar extends ConsumerWidget {
                     ),
                     const SizedBox(width: 14),
                     const _VolumeControl(),
+                    const SizedBox(width: 14),
+                    // Minimize to the floating mini-player.
+                    _BarIcon(
+                      icon: Icons.picture_in_picture_alt_rounded,
+                      size: 20,
+                      onTap: () => WindowMode.enterMini(ref),
+                    ),
                   ],
                 ),
               ),

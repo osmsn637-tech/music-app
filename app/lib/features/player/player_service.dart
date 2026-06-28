@@ -91,7 +91,6 @@ class PlayerService {
   bool _aActive = true;
   bool _sessionConfigured = false;
   bool _pausedByInterruption = false;
-  double _speed = 1.0;
 
   SoundHandle? get _activeHandle => _aActive ? _handleA : _handleB;
   AudioSource? get _activeSource => _aActive ? _sourceA : _sourceB;
@@ -335,7 +334,12 @@ class PlayerService {
     if (crossfade <= Duration.zero) {
       _fadeTimer?.cancel();
       await _stopAndUnloadAll();
-      final loaded = await _loadAndPlay(file.path, onActive: true, volume: 1.0);
+      final loaded = await _loadAndPlay(
+        file.path,
+        onActive: true,
+        volume: 1.0,
+        scale: song.tempoScale,
+      );
       _startPositionPolling();
       _durCtrl.add(loaded);
       _emitState(
@@ -355,6 +359,7 @@ class PlayerService {
       file.path,
       onActive: false, // load onto idle deck
       volume: 0.0,
+      scale: song.tempoScale,
     );
     _aActive = !_aActive; // incoming is now "active"
     _startPositionPolling();
@@ -473,7 +478,12 @@ class PlayerService {
     _emitState(_state.copyWith(processingState: PlayerProcessingState.loading));
     _fadeTimer?.cancel();
     await _stopAndUnloadAll();
-    final loaded = await _loadAndPlay(file.path, onActive: true, volume: 0.0);
+    final loaded = await _loadAndPlay(
+      file.path,
+      onActive: true,
+      volume: 0.0,
+      scale: song.tempoScale,
+    );
     final h = _activeHandle;
     if (h != null) {
       try {
@@ -493,15 +503,15 @@ class PlayerService {
     );
   }
 
-  /// Playback speed (1.0 = normal). Applies to the active deck now and to
-  /// every subsequently loaded track.
-  double get speed => _speed;
-  void setSpeed(double speed) {
-    _speed = speed.clamp(0.25, 3.0);
+  /// Applies a tempo (speed multiplier, 1.0 = original) to the currently
+  /// playing deck — used for a live preview while editing the now-playing
+  /// song's tempo. Persistence is per song (see [SongRepository.setTempoScale]);
+  /// the next load picks the saved value up via [playSong]/[prepare].
+  void setActiveTempo(double scale) {
     final h = _activeHandle;
     if (h != null) {
       try {
-        _soloud.setRelativePlaySpeed(h, _speed);
+        _soloud.setRelativePlaySpeed(h, scale.clamp(0.25, 3.0));
       } catch (_) {}
     }
   }
@@ -512,14 +522,16 @@ class PlayerService {
     String path, {
     required bool onActive,
     required double volume,
+    double scale = 1.0,
   }) async {
     final source = await _soloud.loadFile(path);
     final duration = _soloud.getLength(source);
     final handle = await _soloud.play(source, volume: volume);
-    // Carry the chosen playback speed onto each new track.
-    if (_speed != 1.0) {
+    // Apply this song's saved tempo (pitch moves with it — the engine resamples).
+    final s = scale.clamp(0.25, 3.0);
+    if (s != 1.0) {
       try {
-        _soloud.setRelativePlaySpeed(handle, _speed);
+        _soloud.setRelativePlaySpeed(handle, s);
       } catch (_) {}
     }
 

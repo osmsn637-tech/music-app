@@ -11,12 +11,7 @@ import 'glass_kit.dart';
 /// Shared by the desktop now-playing bar and the mobile full player so a
 /// handoff can be started from either.
 Future<void> showConnectSheet(BuildContext context) {
-  return showModalBottomSheet<void>(
-    context: context,
-    backgroundColor: const Color(0xFF121216),
-    showDragHandle: true,
-    builder: (_) => const ConnectDeviceSheet(),
-  );
+  return showGlassSheet<void>(context, child: const ConnectDeviceSheet());
 }
 
 class ConnectDeviceSheet extends ConsumerWidget {
@@ -29,88 +24,82 @@ class ConnectDeviceSheet extends ConsumerWidget {
     final fg = LumenTokens.fg(context);
 
     if (!c.configured) {
-      return SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                "Live Connect isn't set up",
-                style: TextStyle(
-                  color: fg,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                ),
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              "Live Connect isn't set up",
+              style: TextStyle(
+                color: fg,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
               ),
-              const SizedBox(height: 8),
-              Text(
-                'Add the connect URL + room code in Settings → Live Connect, '
-                'then open Flacko on your other devices with the same code.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: LumenTokens.fgDimOf(context),
-                  fontSize: 13,
-                  height: 1.4,
-                ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Add the connect URL + room code in Settings → Live Connect, '
+              'then open Flacko on your other devices with the same code.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: LumenTokens.fgDimOf(context),
+                fontSize: 13,
+                height: 1.4,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       );
     }
 
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Live "playing on <other device>" card with a self-ticking
-            // progress bar + a Continue-here pull. Hides itself when nothing
-            // is playing on another device.
-            const _RemoteNowPlaying(),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Live "playing on <other device>" card with a self-ticking
+          // progress bar + a Continue-here pull. Hides itself when nothing
+          // is playing on another device.
+          const _RemoteNowPlaying(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Text(
+              c.connected ? 'Play on…' : 'Connecting…',
+              style: TextStyle(
+                color: fg,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          for (final d in c.devices)
+            _DeviceRow(
+              name: d.name,
+              platform: d.platform,
+              active: d.deviceId == c.activeDeviceId,
+              onTap: d.deviceId == c.activeDeviceId
+                  ? null
+                  : () {
+                      svc.transferTo(d.deviceId);
+                      Navigator.pop(context);
+                    },
+            ),
+          if (c.devices.isEmpty)
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
               child: Text(
-                c.connected ? 'Play on…' : 'Connecting…',
+                'No other devices online. Open Flacko on another device with '
+                'the same room code.',
                 style: TextStyle(
-                  color: fg,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
+                  color: LumenTokens.fgDim2Of(context),
+                  fontSize: 12.5,
+                  height: 1.4,
                 ),
               ),
             ),
-            for (final d in c.devices)
-              _DeviceRow(
-                name: d.name,
-                platform: d.platform,
-                active: d.deviceId == c.activeDeviceId,
-                onTap: d.deviceId == c.activeDeviceId
-                    ? null
-                    : () {
-                        svc.transferTo(d.deviceId);
-                        Navigator.pop(context);
-                      },
-              ),
-            if (c.devices.isEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
-                child: Text(
-                  'No other devices online. Open Flacko on another device with '
-                  'the same room code.',
-                  style: TextStyle(
-                    color: LumenTokens.fgDim2Of(context),
-                    fontSize: 12.5,
-                    height: 1.4,
-                  ),
-                ),
-              ),
-          ],
-        ),
+        ],
       ),
     );
   }
@@ -220,8 +209,9 @@ class _RemoteNowPlayingState extends ConsumerState<_RemoteNowPlaying> {
     if (remote == null || sess == null) return const SizedBox.shrink();
 
     final songId = sess.currentSongId;
-    final songAsync =
-        songId == null ? null : ref.watch(songByIdProvider(songId));
+    final songAsync = songId == null
+        ? null
+        : ref.watch(songByIdProvider(songId));
     final song = songAsync?.valueOrNull;
     final notHere = songAsync != null && !songAsync.isLoading && song == null;
 
@@ -241,8 +231,11 @@ class _RemoteNowPlayingState extends ConsumerState<_RemoteNowPlaying> {
         children: [
           Row(
             children: [
-              Icon(_platformIcon(remote.platform),
-                  size: 16, color: LumenTokens.accent),
+              Icon(
+                _platformIcon(remote.platform),
+                size: 16,
+                color: LumenTokens.accent,
+              ),
               const SizedBox(width: 7),
               Expanded(
                 child: Text(
@@ -263,14 +256,21 @@ class _RemoteNowPlayingState extends ConsumerState<_RemoteNowPlaying> {
             title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: fg, fontSize: 15.5, fontWeight: FontWeight.w700),
+            style: TextStyle(
+              color: fg,
+              fontSize: 15.5,
+              fontWeight: FontWeight.w700,
+            ),
           ),
           if (artist != null && artist.isNotEmpty)
             Text(
               artist,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: LumenTokens.fgDimOf(context), fontSize: 12.5),
+              style: TextStyle(
+                color: LumenTokens.fgDimOf(context),
+                fontSize: 12.5,
+              ),
             ),
           const SizedBox(height: 10),
           if (durMs > 0)
@@ -288,9 +288,15 @@ class _RemoteNowPlayingState extends ConsumerState<_RemoteNowPlaying> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(_clock(posMs), style: TextStyle(color: dim2, fontSize: 11)),
+                Text(
+                  _clock(posMs),
+                  style: TextStyle(color: dim2, fontSize: 11),
+                ),
                 if (durMs > 0)
-                  Text(_clock(durMs), style: TextStyle(color: dim2, fontSize: 11)),
+                  Text(
+                    _clock(durMs),
+                    style: TextStyle(color: dim2, fontSize: 11),
+                  ),
               ],
             ),
           ),

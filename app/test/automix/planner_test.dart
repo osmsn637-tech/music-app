@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:music_app/features/automix/engine/automix_planner.dart';
+import 'package:music_app/features/automix/engine/cue_selector.dart';
 import 'package:music_app/features/automix/model/automix_enums.dart';
 import 'package:music_app/features/automix/model/track_analysis.dart';
 
@@ -65,6 +66,25 @@ void main() {
     test('mix-out never lands before the playhead', () {
       final p = planner.plan(out: hold, incoming: aLot, playheadSec: 200);
       expect(p.startSecOnOutgoing, greaterThanOrEqualTo(200));
+    });
+
+    test('incoming mixes in on real music, not a silent/sparse intro', () {
+      // hold_that_heat's intro section energy is ~0.27 (sparse); the mix-in
+      // must skip it and land on the energetic section that follows.
+      final firstEnergetic = firstEnergeticSec(hold);
+      final introEnd = hold.sections.first.endSec;
+      expect(firstEnergetic, greaterThanOrEqualTo(introEnd - 0.1),
+          reason: 'should skip the sparse intro section');
+      final sec = hold.sectionAt(firstEnergetic);
+      expect(sec?.energy ?? 0, greaterThanOrEqualTo(0.4));
+    });
+
+    test('blend runs to the outgoing track end (outgoing fades, no cut)', () {
+      final dur = hold.durationSec;
+      final p = planner.plan(out: hold, incoming: aLot, playheadSec: dur - 12);
+      final blendEnds = p.startSecOnOutgoing + p.durationSec;
+      expect((dur - blendEnds).abs(), lessThan(1.0),
+          reason: 'the blend should finish right as the outgoing ends');
     });
 
     test('auto-advance near the end gives a real blend, not a ~0s hard cut', () {

@@ -58,8 +58,12 @@ class _WaveformBarsState extends State<WaveformBars>
             children: List.generate(_heights.length, (i) {
               final phase = (_c.value - _delays[i]) % 1.0;
               final scale = widget.animated
-                  ? 0.3 + 0.7 * (0.5 - 0.5 *
-                      (1 - 2 * (phase < 0.5 ? phase : 1 - phase)).abs())
+                  ? 0.3 +
+                        0.7 *
+                            (0.5 -
+                                0.5 *
+                                    (1 - 2 * (phase < 0.5 ? phase : 1 - phase))
+                                        .abs())
                   : _heights[i];
               return Padding(
                 padding: EdgeInsets.symmetric(horizontal: widget.spacing / 2),
@@ -123,34 +127,39 @@ class _VisualizerBarsState extends State<VisualizerBars>
   @override
   Widget build(BuildContext context) {
     final color = widget.color ?? DefaultTextStyle.of(context).style.color!;
-    return SizedBox(
-      height: widget.height,
-      child: AnimatedBuilder(
-        animation: _c,
-        builder: (context, _) {
-          return Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: List.generate(_heights.length, (i) {
-              final phase = (_c.value - _delays[i]) % 1.0;
-              final scale = widget.animated
-                  ? 0.4 + 0.6 *
-                      (1 - (1 - 2 * (phase < 0.5 ? phase : 1 - phase)).abs())
-                  : 1.0;
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 1),
-                child: Container(
-                  width: 2,
-                  height: widget.height * _heights[i] * scale,
-                  decoration: BoxDecoration(
-                    color: color,
-                    borderRadius: BorderRadius.circular(1),
+    return RepaintBoundary(
+      child: SizedBox(
+        height: widget.height,
+        child: AnimatedBuilder(
+          animation: _c,
+          builder: (context, _) {
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: List.generate(_heights.length, (i) {
+                final phase = (_c.value - _delays[i]) % 1.0;
+                final scale = widget.animated
+                    ? 0.4 +
+                          0.6 *
+                              (1 -
+                                  (1 - 2 * (phase < 0.5 ? phase : 1 - phase))
+                                      .abs())
+                    : 1.0;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 1),
+                  child: Container(
+                    width: 2,
+                    height: widget.height * _heights[i] * scale,
+                    decoration: BoxDecoration(
+                      color: color,
+                      borderRadius: BorderRadius.circular(1),
+                    ),
                   ),
-                ),
-              );
-            }),
-          );
-        },
+                );
+              }),
+            );
+          },
+        ),
       ),
     );
   }

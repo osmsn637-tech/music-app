@@ -48,8 +48,26 @@ class InlineLyrics extends ConsumerWidget {
     return ref
         .watch(lyricsForSongProvider(song))
         .when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => Center(child: Text('Error loading lyrics: $e')),
+          loading: () => const Center(
+            child: SizedBox(
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                color: Colors.white,
+              ),
+            ),
+          ),
+          error: (e, _) => Center(
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Text(
+                'Error loading lyrics: $e',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Color(0xB3FFFFFF), fontSize: 14),
+              ),
+            ),
+          ),
           data: (result) {
             switch (result.kind) {
               case LyricsKind.synced:
@@ -163,11 +181,12 @@ class _SyncedLyricsViewState extends ConsumerState<_SyncedLyricsView>
   );
   bool _providersSeeded = false;
 
-  // Scroll-aware blur: non-active lines blur when the list is settled and
-  // snap sharp while the user is scrolling. Mirrors [_posNotifier]'s pattern
-  // so only the visible rows rebuild — never the whole ListView.
+  // Off-active blur: non-active lines are blurred (depth-of-field) while the
+  // view is anchored to the active line, and stay SHARP the whole time the
+  // user browses — re-blurring ONLY when we re-anchor (re-jump) to the active
+  // line (see [_scrollToActive]), not on every momentary scroll-settle.
+  // Mirrors [_posNotifier]'s pattern so only the visible rows rebuild.
   final ValueNotifier<bool> _scrollingNotifier = ValueNotifier<bool>(false);
-  Timer? _scrollSettle;
 
   /// Indices of lyric lines the user has picked for share-as-image.
   /// Empty = no selection mode (taps seek normally). Capped at 4 lines
@@ -227,9 +246,10 @@ class _SyncedLyricsViewState extends ConsumerState<_SyncedLyricsView>
   /// outro (when the playhead is past the active line's end, with a small
   /// grace so back-to-back line boundaries don't flicker the highlight off).
   int _resolveActive(Duration position) {
-    var idx = LrcParser
-        .activeIndex(widget.lines, position)
-        .clamp(-1, widget.lines.length - 1);
+    var idx = LrcParser.activeIndex(
+      widget.lines,
+      position,
+    ).clamp(-1, widget.lines.length - 1);
     if (idx >= 0) {
       // Generous grace so only genuine instrumental breaks clear the
       // highlight — natural inter-line pauses keep the previous line lit.
@@ -255,7 +275,6 @@ class _SyncedLyricsViewState extends ConsumerState<_SyncedLyricsView>
     _ticker.dispose();
     _scroll.dispose();
     _posNotifier.dispose();
-    _scrollSettle?.cancel();
     _scrollingNotifier.dispose();
     super.dispose();
   }
@@ -540,6 +559,10 @@ class _SyncedLyricsViewState extends ConsumerState<_SyncedLyricsView>
       index,
       viewportHeight,
     ).clamp(_scroll.position.minScrollExtent, _scroll.position.maxScrollExtent);
+    // Re-anchoring to the active line is the ONE moment the depth-of-field
+    // returns — eased back in via the rows' TweenAnimationBuilder. Browsing
+    // keeps the lines sharp until this fires (after the user-scroll grace).
+    if (_scrollingNotifier.value) _scrollingNotifier.value = false;
     if (animate) {
       _scroll.animateTo(
         target,
@@ -580,21 +603,14 @@ class _SyncedLyricsViewState extends ConsumerState<_SyncedLyricsView>
     if (n is UserScrollNotification && n.direction != ScrollDirection.idle) {
       // User-initiated drag/fling. (Our own animateTo emits ScrollUpdate but
       // never UserScroll, so auto-scroll doesn't trip this.) Sharpen the
-      // lyrics, surface the player controls, and hold the auto-scroll grace.
+      // lyrics and HOLD them sharp — they re-blur only when we re-anchor to
+      // the active line (in _scrollToActive), not on every scroll-settle.
       _lastUserScrollAt = DateTime.now();
       _awaitingReturn = true; // glide back to active once the grace elapses
-      _scrollSettle?.cancel();
       if (!_scrollingNotifier.value) _scrollingNotifier.value = true;
       // Hand the swipe direction to the host (player) so it can hide controls
       // on a downward swipe and reveal them on the second upward swipe.
       widget.onScrollGesture?.call(n.direction);
-    } else if (n is ScrollEndNotification) {
-      // Let the blur ease back in shortly after motion (incl. fling momentum)
-      // settles, so it doesn't re-blur mid-flick.
-      _scrollSettle?.cancel();
-      _scrollSettle = Timer(const Duration(milliseconds: 220), () {
-        if (mounted) _scrollingNotifier.value = false;
-      });
     }
     return false;
   }
@@ -670,12 +686,7 @@ class _SyncedLyricsViewState extends ConsumerState<_SyncedLyricsView>
       });
     }
 
-    final mqSize = MediaQuery.sizeOf(context);
     final lines = widget.lines;
-
-    // Measure once per (lines, content-width). Content width matches the
-    // ListView's horizontal padding: 18 left + 50 right.
-    _ensureMeasured(mqSize.width - 18 - 50);
 
     return Stack(
       children: [
@@ -692,6 +703,12 @@ class _SyncedLyricsViewState extends ConsumerState<_SyncedLyricsView>
                   // active line anchored near the top of the *visible*
                   // pane instead of dumping it off the bottom.
                   final viewportHeight = constraints.maxHeight;
+                  // Measure line heights against the ACTUAL list width, which on
+                  // desktop (the 640px panel) and the mini-player is far
+                  // narrower than the window — matching the 18 + 50 h-padding
+                  // below. Measuring with the window width made wrapped lines
+                  // mis-measure short, drifting the active line off the bottom.
+                  _ensureMeasured(constraints.maxWidth - 18 - 50);
                   return NotificationListener<ScrollNotification>(
                     onNotification: _onScrollNotification,
                     child: ListView.builder(
@@ -755,6 +772,21 @@ class _SyncedLyricsViewState extends ConsumerState<_SyncedLyricsView>
             ),
           ],
         ),
+        // Frosted glass edges — lyric lines scroll *behind* a soft frost
+        // at the top and bottom of the pane (seen through the blur)
+        // instead of hard-cutting at the boundary.
+        const Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: _LyricFrostEdge(top: true),
+        ),
+        const Positioned(
+          bottom: 0,
+          left: 0,
+          right: 0,
+          child: _LyricFrostEdge(top: false),
+        ),
         // Share toolbar — slides in from the top whenever the user has
         // any line selected. Sits above the lyrics, doesn't push them.
         Positioned(
@@ -790,6 +822,50 @@ class _SyncedLyricsViewState extends ConsumerState<_SyncedLyricsView>
             child: _OffsetControl(songId: widget.song.id),
           ),
       ],
+    );
+  }
+}
+
+/// Soft frosted edge for the lyrics pane. Two stacked blur strips — a
+/// light frost over the whole band and a heavier one concentrated at the
+/// very edge — so lyric lines dissolve into glass as they reach the top /
+/// bottom rather than hard-cutting. The lines there are already
+/// depth-of-field blurred, which hides the strips' inner seam. [top]
+/// picks which edge it hugs.
+class _LyricFrostEdge extends StatelessWidget {
+  const _LyricFrostEdge({required this.top});
+
+  final bool top;
+
+  static const double _band = 96;
+
+  Widget _strip(double height, double sigma) => ClipRect(
+    child: ShaderMask(
+      blendMode: BlendMode.dstIn,
+      shaderCallback: (rect) => LinearGradient(
+        begin: top ? Alignment.topCenter : Alignment.bottomCenter,
+        end: top ? Alignment.bottomCenter : Alignment.topCenter,
+        colors: [Colors.white, Colors.white.withValues(alpha: 0)],
+      ).createShader(rect),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+        child: SizedBox(height: height, width: double.infinity),
+      ),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final align = top ? Alignment.topCenter : Alignment.bottomCenter;
+    return IgnorePointer(
+      child: SizedBox(
+        height: _band,
+        width: double.infinity,
+        child: Stack(
+          alignment: align,
+          children: [_strip(_band, 7), _strip(_band * 0.55, 16)],
+        ),
+      ),
     );
   }
 }
@@ -1097,9 +1173,8 @@ class _LyricLineRow extends StatelessWidget {
     // `sigma < 0.05` early-return means a sharp/active line pays zero cost:
     // no ImageFiltered (and thus no per-frame saveLayer) over the karaoke
     // painter.
-    final wantBlur = !isActive &&
-        distanceFromActive >= 1 &&
-        distanceFromActive <= 6;
+    final wantBlur =
+        !isActive && distanceFromActive >= 1 && distanceFromActive <= 6;
     content = ValueListenableBuilder<bool>(
       valueListenable: scrollingNotifier,
       child: content,
@@ -1429,18 +1504,34 @@ class _PlainLyricsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(24, 24, 24, 100),
-      child: Text(
-        text,
-        style: const TextStyle(
-          fontSize: 22,
-          fontWeight: FontWeight.w800,
-          color: Colors.white,
-          height: 1.22,
-          letterSpacing: -0.55,
+    return Stack(
+      children: [
+        SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 100),
+          child: Text(
+            text,
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
+              height: 1.22,
+              letterSpacing: -0.55,
+            ),
+          ),
         ),
-      ),
+        const Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: _LyricFrostEdge(top: true),
+        ),
+        const Positioned(
+          bottom: 0,
+          left: 0,
+          right: 0,
+          child: _LyricFrostEdge(top: false),
+        ),
+      ],
     );
   }
 }

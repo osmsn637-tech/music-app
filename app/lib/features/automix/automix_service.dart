@@ -118,6 +118,33 @@ class AutoMixService {
     }
   }
 
+  /// Where on [current] the auto-advance blend should *begin* — its natural
+  /// outro, snapped to a downbeat, but never earlier than [maxBlendSec] before
+  /// the end (so the overlap stays sane and the blend can still finish exactly
+  /// at the track's end). Returned in seconds, or null if either track lacks
+  /// analysis. The player controller arms its trigger here so the mix starts
+  /// as early as the music allows instead of a fixed window before the end.
+  Future<double?> plannedMixOutSec({
+    required SongRow current,
+    required SongRow next,
+    double maxBlendSec = 18.0,
+    double minBlendSec = 6.0,
+  }) async {
+    final out = await _analysis.forSong(current);
+    final inc = await _analysis.forSong(next);
+    if (out == null || inc == null) return null;
+    final dur = out.durationSec;
+    if (dur <= minBlendSec + 1) return null;
+    final outro = out.cuePoints.outroStartSec;
+    final floor = dur - maxBlendSec; // don't start more than maxBlend early
+    var mixOut = outro > floor ? outro : floor; // max(outro, end - maxBlend)
+    mixOut = mixOut.clamp(0.0, dur - minBlendSec); // leave room to blend
+    if (out.beatGrid.hasGrid) {
+      mixOut = out.beatGrid.nextDownbeatAtOrAfter(mixOut);
+    }
+    return mixOut;
+  }
+
   /// Abort an in-progress mix. [keepIncoming] leaves the new track playing.
   Future<void> cancel({bool keepIncoming = true}) =>
       _engine.stop(keepIncoming: keepIncoming);

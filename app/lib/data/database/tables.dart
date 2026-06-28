@@ -19,6 +19,11 @@ class Songs extends Table {
   TextColumn get lastPlayedAt => text().nullable()();
   IntColumn get isFavorite => integer().withDefault(const Constant(0))();
 
+  /// Per-song playback tempo as a speed multiplier (1.0 = original). Set from
+  /// the "Tempo" control; applied whenever this song plays. Pitch moves with
+  /// it (the engine resamples), so keep changes modest for natural sound.
+  RealColumn get tempoScale => real().withDefault(const Constant(1.0))();
+
   @override
   Set<Column> get primaryKey => {id};
 }
