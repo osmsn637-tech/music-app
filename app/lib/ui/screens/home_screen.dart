@@ -13,6 +13,7 @@ import '../../features/player/now_playing_controller.dart';
 import '../../features/player/providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/album_art.dart';
+import '../widgets/explicit_badge.dart';
 import '../widgets/glass.dart';
 import '../widgets/horizontal_fade_rail.dart';
 import '../widgets/playlist_cover.dart';
@@ -507,16 +508,26 @@ class _SongRow extends ConsumerWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    song.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: active ? FontWeight.w800 : FontWeight.w700,
-                      height: 1.2,
-                      color: active ? tint : null,
-                    ),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          song.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: active
+                                ? FontWeight.w800
+                                : FontWeight.w700,
+                            height: 1.2,
+                            color: active ? tint : null,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      const ExplicitBadge(),
+                    ],
                   ),
                   const SizedBox(height: 2),
                   Row(

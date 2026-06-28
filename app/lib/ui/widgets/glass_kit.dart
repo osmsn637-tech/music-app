@@ -456,10 +456,25 @@ class StageScaffold extends StatelessWidget {
           child: bleedTop
               // Body fills behind the status bar; the top bar floats over
               // it so a hero wash reaches the very top edge.
+              //
+              // StackFit.expand is load-bearing: a Scaffold hands its body
+              // LOOSE constraints (minHeight 0), and a default Stack sizes
+              // its height to its NON-positioned children only. With the
+              // body positioned (fill) and just the bar non-positioned, the
+              // Stack collapsed to the bar's ~54px and the whole page
+              // rendered in an invisible strip. Keeping the body
+              // non-positioned + StackFit.expand forces it to full height;
+              // the bar stays a Positioned overlay so it isn't stretched.
               ? Stack(
+                  fit: StackFit.expand,
                   children: [
-                    Positioned.fill(child: body),
-                    SafeArea(bottom: false, child: topBar),
+                    body,
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: SafeArea(bottom: false, child: topBar),
+                    ),
                   ],
                 )
               // Default: the top bar reserves its own row above the body.

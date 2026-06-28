@@ -1,5 +1,3 @@
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -76,125 +74,105 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final state = ref.watch(librarySearchControllerProvider);
     final playingId = ref.watch(nowPlayingProvider.select((s) => s?.id));
 
-    return Stack(
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(
+        0,
+        LumenTokens.topSafePad,
+        0,
+        LumenTokens.bottomSafePad,
+      ),
       children: [
-        ListView(
-          padding: const EdgeInsets.fromLTRB(
+        const Padding(
+          padding: EdgeInsets.fromLTRB(
+            LumenTokens.pagePad,
             0,
-            LumenTokens.topSafePad,
-            0,
-            LumenTokens.bottomSafePad,
+            LumenTokens.pagePad,
+            16,
           ),
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(
-                LumenTokens.pagePad,
-                0,
-                LumenTokens.pagePad,
-                16,
-              ),
-              child: Text(
-                'Search',
-                style: TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -1,
-                  height: 1.05,
-                ),
-              ),
+          child: Text(
+            'Search',
+            style: TextStyle(
+              fontSize: 32,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -1,
+              height: 1.05,
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                LumenTokens.pagePad,
-                0,
-                LumenTokens.pagePad,
-                22,
-              ),
-              child: GlassField(
-                controller: _controller,
-                hint: 'Artists, songs, albums',
-                leading: Icon(
-                  Icons.search,
-                  size: 18,
-                  color: LumenTokens.fgDimOf(context),
-                ),
-                trailing: state.query.isEmpty
-                    ? null
-                    : Pressable(
-                        onTap: () {
-                          _controller.clear();
-                          ref
-                              .read(librarySearchControllerProvider.notifier)
-                              .onQueryChanged('');
-                        },
-                        child: Icon(
-                          Icons.clear,
-                          size: 18,
-                          color: LumenTokens.fgDimOf(context),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            LumenTokens.pagePad,
+            0,
+            LumenTokens.pagePad,
+            22,
+          ),
+          child: GlassField(
+            controller: _controller,
+            hint: 'Artists, songs, albums',
+            leading: Icon(
+              Icons.search,
+              size: 18,
+              color: LumenTokens.fgDimOf(context),
+            ),
+            trailing: state.query.isEmpty
+                ? null
+                : Pressable(
+                    onTap: () {
+                      _controller.clear();
+                      ref
+                          .read(librarySearchControllerProvider.notifier)
+                          .onQueryChanged('');
+                    },
+                    child: Icon(
+                      Icons.clear,
+                      size: 18,
+                      color: LumenTokens.fgDimOf(context),
+                    ),
+                  ),
+            onChanged: (q) => ref
+                .read(librarySearchControllerProvider.notifier)
+                .onQueryChanged(q),
+          ),
+        ),
+        // Browse ↔ loading ↔ results cross-fade instead of hard-cutting.
+        FadeThroughSwitcher(
+          child: state.query.isEmpty
+              ? Column(
+                  key: const ValueKey('browse'),
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const _ArtistsRail(),
+                    const SizedBox(height: 22),
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        LumenTokens.pagePad,
+                        0,
+                        LumenTokens.pagePad,
+                        12,
+                      ),
+                      child: Text(
+                        'Browse all',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.5,
                         ),
                       ),
-                onChanged: (q) => ref
-                    .read(librarySearchControllerProvider.notifier)
-                    .onQueryChanged(q),
-              ),
-            ),
-            // Browse ↔ loading ↔ results cross-fade instead of hard-cutting.
-            FadeThroughSwitcher(
-              child: state.query.isEmpty
-                  ? Column(
-                      key: const ValueKey('browse'),
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const _ArtistsRail(),
-                        const SizedBox(height: 22),
-                        const Padding(
-                          padding: EdgeInsets.fromLTRB(
-                            LumenTokens.pagePad,
-                            0,
-                            LumenTokens.pagePad,
-                            12,
-                          ),
-                          child: Text(
-                            'Browse all',
-                            style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: -0.5,
-                            ),
-                          ),
-                        ),
-                        _BrowseGrid(onPickGenre: _setQuery),
-                      ],
-                    )
-                  : state.loading
-                  ? const Padding(
-                      key: ValueKey('loading'),
-                      padding: EdgeInsets.all(40),
-                      child: Center(child: CircularProgressIndicator()),
-                    )
-                  : Column(
-                      key: const ValueKey('results'),
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: _buildResults(context, state, playingId),
                     ),
-            ),
-          ],
-        ),
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          child: IgnorePointer(
-            child: ClipRect(
-              child: BackdropFilter(
-                filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                child: SizedBox(
-                  height: MediaQuery.of(context).padding.top + 12,
-                  width: double.infinity,
+                    _BrowseGrid(onPickGenre: _setQuery),
+                  ],
+                )
+              : state.loading
+              ? const Padding(
+                  key: ValueKey('loading'),
+                  padding: EdgeInsets.all(40),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              : Column(
+                  key: const ValueKey('results'),
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: _buildResults(context, state, playingId),
                 ),
-              ),
-            ),
-          ),
         ),
       ],
     );

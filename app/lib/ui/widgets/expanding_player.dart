@@ -612,6 +612,30 @@ class _PlayerMorphState extends State<_PlayerMorph>
               ),
             ),
 
+            // 3. Frosted-glass sheet — when the queue / lyrics surface is
+            //    open the whole player reads as ONE sheet of frosted glass
+            //    over a blurred bloom; the cover, title, and controls then
+            //    sit on top of it. Fades in with z (max of lyrics + queue),
+            //    so the cover-only view keeps its vivid bloom untouched.
+            if (e > 0.3 && z > 0.01)
+              Positioned.fromRect(
+                rect: cardRect,
+                child: IgnorePointer(
+                  child: Opacity(
+                    opacity: ((e - 0.3) / 0.7).clamp(0.0, 1.0) * z,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(cardRadius),
+                      child: BackdropFilter(
+                        filter: ui.ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+                        child: Container(
+                          color: Colors.white.withValues(alpha: 0.06),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
             // 4. Mini-only chrome.
             if (e < 0.7)
               _MiniChrome(
@@ -813,9 +837,7 @@ class _InlineQueue extends ConsumerWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 decoration: const BoxDecoration(
                   color: Color(0x0AFFFFFF),
-                  border: Border(
-                    bottom: BorderSide(color: Color(0x14FFFFFF)),
-                  ),
+                  border: Border(bottom: BorderSide(color: Color(0x14FFFFFF))),
                 ),
                 child: const Row(
                   children: [
@@ -1779,7 +1801,10 @@ class _SlimScrubberState extends ConsumerState<_SlimScrubber>
 
   @override
   Widget build(BuildContext context) {
-    ref.listen<bool>(autoMixMixingProvider, (_, next) => _onMixingChanged(next));
+    ref.listen<bool>(
+      autoMixMixingProvider,
+      (_, next) => _onMixingChanged(next),
+    );
     final mixing = ref.watch(autoMixMixingProvider);
 
     final position =
@@ -1787,7 +1812,10 @@ class _SlimScrubberState extends ConsumerState<_SlimScrubber>
     final duration =
         ref.watch(playerDurationProvider).valueOrNull ?? Duration.zero;
     final hasDuration = duration > Duration.zero;
-    final maxMs = duration.inMilliseconds.toDouble().clamp(1.0, double.infinity);
+    final maxMs = duration.inMilliseconds.toDouble().clamp(
+      1.0,
+      double.infinity,
+    );
     final liveMs = position.inMilliseconds
         .clamp(0, duration.inMilliseconds)
         .toDouble();
@@ -1832,7 +1860,9 @@ class _SlimScrubberState extends ConsumerState<_SlimScrubber>
                   inactiveTrackColor: Colors.white.withValues(alpha: 0.18),
                   thumbColor: Colors.white,
                   trackHeight: 3,
-                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+                  thumbShape: const RoundSliderThumbShape(
+                    enabledThumbRadius: 5,
+                  ),
                   overlayShape: const RoundSliderOverlayShape(
                     overlayRadius: 12,
                   ),

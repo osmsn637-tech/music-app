@@ -1,5 +1,3 @@
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -96,59 +94,49 @@ class AlbumDetailScreen extends ConsumerWidget {
               ? palette.first
               : LumenTokens.accent;
 
-          return Stack(
-            children: [
-              CustomScrollView(
-                slivers: [
-                  SliverToBoxAdapter(
-                    child: _Hero(
-                      album: album,
-                      cover: cover,
-                      artist: artist,
-                      meta: [
-                        '${songs.length} song${songs.length == 1 ? '' : 's'}',
-                        if (totalMs > 0) _fmtTotal(totalMs),
-                      ].join(' · '),
-                      tint: tint,
-                      onPlay: () => _play(context, ref, songs, 0),
-                      onShuffle: () =>
-                          _play(context, ref, [...songs]..shuffle(), 0),
-                      onArtist: artist.isEmpty
-                          ? null
-                          : () => openArtist(context, artist),
-                    ),
-                  ),
-                  SliverList(
-                    delegate: SliverChildBuilderDelegate((context, i) {
-                      final s = songs[i];
-                      final current = playingId == s.id;
-                      return _TrackRow(
-                        index: i + 1,
-                        song: s,
-                        current: current,
-                        isPlaying: isPlaying,
-                        tint: tint,
-                        duration: _fmtTrack(s.durationMs),
-                        onTap: () {
-                          if (current && isPlaying) {
-                            PlayerExpansionScope.maybeRead(context)?.expand();
-                          } else {
-                            _play(context, ref, songs, i);
-                          }
-                        },
-                        onMore: () => SongActionsSheet.show(context, s),
-                      );
-                    }, childCount: songs.length),
-                  ),
-                  SliverToBoxAdapter(child: SizedBox(height: bottomPad)),
-                ],
+          return CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(
+                child: _Hero(
+                  album: album,
+                  cover: cover,
+                  artist: artist,
+                  meta: [
+                    '${songs.length} song${songs.length == 1 ? '' : 's'}',
+                    if (totalMs > 0) _fmtTotal(totalMs),
+                  ].join(' · '),
+                  tint: tint,
+                  onPlay: () => _play(context, ref, songs, 0),
+                  onShuffle: () =>
+                      _play(context, ref, [...songs]..shuffle(), 0),
+                  onArtist: artist.isEmpty
+                      ? null
+                      : () => openArtist(context, artist),
+                ),
               ),
-              const Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: IgnorePointer(child: _TopFrostEdge()),
+              SliverList(
+                delegate: SliverChildBuilderDelegate((context, i) {
+                  final s = songs[i];
+                  final current = playingId == s.id;
+                  return _TrackRow(
+                    index: i + 1,
+                    song: s,
+                    current: current,
+                    isPlaying: isPlaying,
+                    tint: tint,
+                    duration: _fmtTrack(s.durationMs),
+                    onTap: () {
+                      if (current && isPlaying) {
+                        PlayerExpansionScope.maybeRead(context)?.expand();
+                      } else {
+                        _play(context, ref, songs, i);
+                      }
+                    },
+                    onMore: () => SongActionsSheet.show(context, s),
+                  );
+                }, childCount: songs.length),
               ),
+              SliverToBoxAdapter(child: SizedBox(height: bottomPad)),
             ],
           );
         },
@@ -401,34 +389,6 @@ class _TrackRow extends StatelessWidget {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TopFrostEdge extends StatelessWidget {
-  const _TopFrostEdge();
-
-  @override
-  Widget build(BuildContext context) {
-    final h = MediaQuery.paddingOf(context).top + 48;
-    return SizedBox(
-      height: h,
-      width: double.infinity,
-      child: ShaderMask(
-        blendMode: BlendMode.dstIn,
-        shaderCallback: (r) => const LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Colors.black, Colors.transparent],
-          stops: [0.55, 1.0],
-        ).createShader(r),
-        child: ClipRect(
-          child: BackdropFilter(
-            filter: ui.ImageFilter.blur(sigmaX: 7, sigmaY: 7),
-            child: SizedBox(height: h, width: double.infinity),
-          ),
         ),
       ),
     );

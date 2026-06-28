@@ -1,5 +1,3 @@
-import 'dart:ui' as ui;
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -179,22 +177,6 @@ class _HomeShellState extends ConsumerState<HomeShell>
                     builder: (_) =>
                         _TabHost(pages: _pages, onScroll: _handleScroll),
                   ),
-                ),
-              ),
-            ),
-          ),
-          // Soft top frost so tab content dissolves under the status bar /
-          // profile button instead of hard-cutting. Pointer-transparent.
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            height: MediaQuery.of(context).padding.top + 56,
-            child: IgnorePointer(
-              child: ClipRect(
-                child: BackdropFilter(
-                  filter: ui.ImageFilter.blur(sigmaX: 6, sigmaY: 6),
-                  child: const SizedBox.expand(),
                 ),
               ),
             ),
